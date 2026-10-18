@@ -45,6 +45,14 @@ export class FeedbackFlow {
   constructor(private directory = fileURLToPath(new URL("../data/feedback/", import.meta.url)),
     private sink: FeedbackSink | null = configuredFeedbackSink(), private hooks: FeedbackHooks = {}) {}
 
+  async hasDraft(conversation: string): Promise<boolean> {
+    const key = createHash("sha256").update(conversation).digest("hex");
+    try {
+      const state = JSON.parse(await readFile(join(this.directory, "state", `${key}.json`), "utf8")) as State;
+      return Boolean(state.draft);
+    } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
+  }
+
   async syncPending(): Promise<{ synced: number; pending: number }> {
     if (!this.sink) return { synced: 0, pending: 0 };
     let names: string[];

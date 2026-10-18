@@ -64,6 +64,28 @@ export class StudySessions {
     const path = join(this.directory,`${key}.json`), temp = `${path}.${randomUUID()}.tmp`;
     await writeFile(temp,JSON.stringify(document),{mode:0o600}); await rename(temp,path);
   }
+  async hasUnfinished(conversation: string): Promise<boolean> {
+    const key=hash(conversation);
+    return this.serialized(key,async()=> (await this.read(key)).sessions.some(s=>s.status==="active"||s.status==="awaiting_feedback"));
+  }
+  async isActive(conversation: string, sessionId: string): Promise<boolean> {
+    const key=hash(conversation);
+    return this.serialized(key,async()=> (await this.read(key)).sessions.some(s=>s.id===sessionId&&s.status==="active"));
+  }
+  async startCalendar(conversation: string, eventKey: string, plannedMinutes: number): Promise<{id:string;reply:string}|null> {
+    if(!Number.isInteger(plannedMinutes)||plannedMinutes<5||plannedMinutes>240)throw new Error("Invalid calendar duration");
+    const key=hash(conversation), id=`cal_${hash(`${key}:${eventKey}`)}`;
+    return this.serialized(key,async()=>{
+      const doc=await this.read(key);
+      const existing=doc.sessions.find(s=>s.id===id);
+      if(existing)return existing.status==="active"?{id,reply:"This calendar session is already started. Text study status."}:null;
+      if(doc.sessions.some(s=>s.status==="active"||s.status==="awaiting_feedback"))return null;
+      doc.sessions.push({id,user_id:key,started_at:new Date().toISOString(),ended_at:null,duration_mins:plannedMinutes,
+        location:null,study_space:null,environment:{},environment_source:null,status:"active",feedback_id:null,is_synthetic:false});
+      await this.save(key,doc);
+      return {id,reply:`Started your calendar study session (${plannedMinutes} planned minutes). Reply with your place and seat, for example library desk, then send a workspace photo or text workspace bright 3 7. Text done when finished.`};
+    });
+  }
   async syncPending(): Promise<void> {
     if (!this.sink) return;
     let names: string[];
@@ -133,8 +155,8 @@ export class StudySessions {
         else reply=await this.score(key,active,doc);
       } else if(active) {
         const parts=command.split(/\s+/);
-        if(parts.length===3 && LOCATIONS.includes(parts[0] as any) && SPACES.includes(parts[1] as any)) {
-          const duration=Number(parts[2]);
+        if((parts.length===3||(parts.length===2&&active.duration_mins!==null)) && LOCATIONS.includes(parts[0] as any) && SPACES.includes(parts[1] as any)) {
+          const duration=parts.length===3?Number(parts[2]):active.duration_mins!;
           if(!Number.isInteger(duration)||duration<5||duration>240)reply="Use planned minutes from 5 to 240.";
           else {active.location=parts[0] as Context["location"];active.study_space=parts[1] as Context["study_space"];active.duration_mins=duration;
             reply="Context saved. Send a workspace photo for Perceptron analysis, or text workspace bright 3 7 using your own lighting, clutter, and comfort ratings. Text done when you finish.";}
