@@ -6,7 +6,7 @@
   "scripts": {
     "start": "bun src/index.ts",
     "dev": "bun --watch src/index.ts",
-    "backend": "python3 analyze_workspace.py",
+    "backend": "python3 -m backend.main",
     "photon": "node --experimental-transform-types --env-file-if-exists=.env bridge/photon.mjs",
     "test": "python3 -m unittest test_backend.py",
     "start:node": "node --experimental-transform-types --env-file-if-exists=.env src/index.ts",

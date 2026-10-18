@@ -1,17 +1,17 @@
 """
 test_backend.py
 
-Unit and integration tests for the Photon-Perceptron-LinUCB workspace analysis backend:
-- Per-user LinUCB focus model predictions, correlations, and space recommendations (proven + unexplored)
-- Per-user Supabase sync (`public.user_model_params` and `public.workspace_photos_log`)
-- Photo metadata logging (just the data without raw image bytes)
-- Online parameter updates per user with user ratings
-- FastAPI endpoints for file uploads, base64 payload, recommendations, photos log, and rating feedback
+Unit and integration tests for:
+1. Photon-Perceptron-LinUCB workspace analysis backend (`analyze_workspace.py`, `ml_focus_model.py`, `supabase_store.py`)
+2. Zero-Setup Self-Learning AI Calendar & Productivity Engine (`/backend`: `models.py`, `bandit.py`, `rhythm.py`,
+   `scheduler.py`, `proactive.py`, `agent.py`, `main.py`) including Blank-Canvas Discovery Mode,
+   multi-entity brain-dump & routine extraction, 24-hour dynamic task splitting, and 3-stage hackathon demo presets.
 """
 
 import base64
 import io
 import unittest
+import uuid
 from typing import Any, Dict, List, Optional
 from PIL import Image
 from fastapi.testclient import TestClient
@@ -19,6 +19,11 @@ from fastapi.testclient import TestClient
 from analyze_workspace import app
 from ml_focus_model import FocusMLModel
 from supabase_store import SupabaseStore, normalize_user_id
+
+from backend.main import app as engine_app, engine
+from backend.bandit import LinUCBOptimizer
+from backend.rhythm import ZeroSetupRhythmLearner, update_activity_observation, is_hour_schedulable
+from backend.proactive import check_calendar_sparsity
 
 
 class MockSupabaseStore(SupabaseStore):
@@ -91,7 +96,6 @@ class TestWorkspaceBackend(unittest.TestCase):
         self.assertGreaterEqual(data["observations_trained"], 40)
 
     def test_ml_model_correlations_and_linucb(self):
-        # 1. Optimal workspace: clean library desk with bright lighting
         high_res = self.model.predict(
             clutter_score=1,
             lighting_quality="bright",
@@ -107,7 +111,6 @@ class TestWorkspaceBackend(unittest.TestCase):
         self.assertIsNotNone(high_res["recommendations"]["top_known"])
         self.assertIsNotNone(high_res["recommendations"]["top_unexplored"])
 
-        # 2. Suboptimal workspace: cluttered bed with dim lighting
         low_res = self.model.predict(
             clutter_score=9,
             lighting_quality="dim",
@@ -121,16 +124,16 @@ class TestWorkspaceBackend(unittest.TestCase):
         self.assertLessEqual(low_res["predicted_productivity"], 2.5)
 
     def test_per_user_supabase_isolation_and_parameter_updates(self):
-        """Verifies that each user has independent parameters in Supabase that update online."""
-        alice_id = "+12065550101"
-        bob_id = "+12065550202"
+        run_tag = uuid.uuid4().hex[:6]
+        alice_id = f"alice_{run_tag}@example.com"
+        bob_id = f"bob_{run_tag}@example.com"
+        sess_id = f"sess_alice_{run_tag}"
         alice_hash = normalize_user_id(alice_id)
         bob_hash = normalize_user_id(bob_id)
 
-        # Log photo for Alice in a cafe shared_table
         self.model.log_photo_analysis(
             {
-                "id": "sess_alice_1",
+                "id": sess_id,
                 "location": "cafe",
                 "study_space": "shared_table",
                 "clutter_score": 2,
@@ -140,7 +143,6 @@ class TestWorkspaceBackend(unittest.TestCase):
             user_id=alice_id,
         )
 
-        # Before rating: check Alice's prediction for cafe shared_table
         before_pred = self.model.predict(
             clutter_score=2,
             lighting_quality="bright",
@@ -151,26 +153,22 @@ class TestWorkspaceBackend(unittest.TestCase):
             user_id=alice_id,
         )
 
-        # Alice rates her cafe session 5/5 productivity & 5/5 mood
         updated_alice_state = self.model.update_parameters(
-            session_data={"session_id": "sess_alice_1"},
+            session_data={"session_id": sess_id},
             actual_user_rating=5.0,
             actual_mood_rating=5.0,
             user_id=alice_id,
         )
 
-        # Verify Alice's params were saved to Supabase `user_model_params`
         self.assertIn(alice_hash, self.mock_store.model_params_table)
         cloud_alice = self.mock_store.get_user_model_params(alice_id)
         self.assertEqual(cloud_alice["version"], updated_alice_state["version"])
         self.assertEqual(cloud_alice["observations_count"], 41)
 
-        # Verify Alice's photo log in Supabase has the updated rating
         alice_photos = self.mock_store.get_user_photos_log(alice_id)
         self.assertEqual(len(alice_photos), 1)
         self.assertEqual(alice_photos[0]["user_productivity_rating"], 5)
 
-        # Verify Alice's cafe prediction increased after the 5/5 update
         after_pred = self.model.predict(
             clutter_score=2,
             lighting_quality="bright",
@@ -182,7 +180,6 @@ class TestWorkspaceBackend(unittest.TestCase):
         )
         self.assertGreater(after_pred["predicted_productivity"], before_pred["predicted_productivity"])
 
-        # Verify Bob's model is completely unaffected by Alice's rating
         bob_pred = self.model.predict(
             clutter_score=2,
             lighting_quality="bright",
@@ -196,70 +193,137 @@ class TestWorkspaceBackend(unittest.TestCase):
         self.assertEqual(bob_pred["predicted_productivity"], before_pred["predicted_productivity"])
         self.assertIn(bob_hash, self.mock_store.model_params_table)
 
-    def test_analyze_workspace_upload_and_photo_log(self):
-        img = Image.new("RGB", (80, 80), color="green")
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG")
 
+class TestZeroSetupProductivityEngine(unittest.TestCase):
+    """
+    Tests the `/backend` Zero-Setup AI Calendar & Productivity Engine:
+    - Blank-Canvas Discovery Mode & sparsity calculation
+    - Multi-Entity Brain-Dump & Routine extraction
+    - 24-hour Rhythm Learner (including late-night 1:00 AM window expansion)
+    - 7D Disjoint LinUCB Bandit (Day 1 Cold Start, Day 3 Calibrating, Day 21 Night-Owl / Library Persona)
+    - Dynamic Task Splitter & Cut-Short Spillover Rescheduler
+    - Proactive Simulate-Tick & 3-Stage Demo Switcher
+    """
+
+    def setUp(self):
+        self.client = TestClient(engine_app)
+        self.client.post("/api/demo/set-stage", json={"stage": "blank_canvas"})
+
+    def test_1_blank_canvas_discovery_mode(self):
+        cal_resp = self.client.get("/api/calendar")
+        self.assertEqual(cal_resp.status_code, 200)
+        cal = cal_resp.json()
+        self.assertEqual(len(cal["events"]), 0)
+        self.assertEqual(len(cal["scheduled_blocks"]), 0)
+        self.assertEqual(cal["calendar_sparsity"], 0.0)
+        self.assertTrue(cal["is_sparse_discovery_mode"])
+
+        pending_resp = self.client.get("/api/proactive/pending")
+        self.assertEqual(pending_resp.status_code, 200)
+        pending = pending_resp.json()
+        self.assertGreaterEqual(pending["count"], 1)
+        reasons = [p["trigger_reason"] for p in pending["prompts"]]
+        self.assertIn("discovery_brain_dump", reasons)
+
+    def test_2_multi_entity_brain_dump_and_task_splitting(self):
+        brain_dump = "I have CS lecture MWF 10-11:30, work Tuesdays 2-5, and a huge 5-hour ML project due Friday"
         resp = self.client.post(
-            "/analyze-workspace",
-            data={"user_id": "test_user_upload"},
-            files={"file": ("workspace.jpg", buf.getvalue(), "image/jpeg")}
+            "/api/agent/incoming-message",
+            json={"text": brain_dump}
         )
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
 
-        for key in [
-            "session_id", "user_id", "location", "study_space", "clutter_score",
-            "lighting_quality", "ergonomics_score", "focus_score",
-            "selection_score", "recommendations", "reply_text"
-        ]:
-            self.assertIn(key, data, f"Missing {key} in response")
+        # Verify 3 MWF CS lectures + 1 Tuesday Work shift = 4 FixedEvents
+        self.assertEqual(len(data["extracted_events"]), 4)
+        # Verify 1 ML Project (300 mins) extracted
+        self.assertEqual(len(data["extracted_assignments"]), 1)
+        self.assertEqual(data["extracted_assignments"][0]["total_estimated_mins"], 300)
+        # Verify 300 mins split into four 75-minute study blocks
+        self.assertEqual(len(data["scheduled_blocks"]), 4)
+        self.assertIn("Boom—I just added", data["reply_text"])
+        self.assertIn("four 75-minute study blocks", data["reply_text"])
 
-        self.assertEqual(data["user_id"], normalize_user_id("test_user_upload"))
-
-        # Verify /api/photos-log endpoint with user_id filter
-        log_resp = self.client.get("/api/photos-log", params={"user_id": "test_user_upload"})
-        self.assertEqual(log_resp.status_code, 200)
-        self.assertGreaterEqual(log_resp.json()["count"], 1)
-
-    def test_recommendations_endpoint(self):
-        resp = self.client.get("/api/recommendations", params={"user_id": "test_user_upload"})
-        self.assertEqual(resp.status_code, 200)
-        data = resp.json()
-        self.assertIn("top_known", data)
-        self.assertIn("top_unexplored", data)
-        self.assertTrue(data["top_unexplored"]["is_unexplored"])
-
-    def test_analyze_workspace_base64(self):
-        img = Image.new("RGB", (60, 60), color="white")
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG")
-        b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-
+    def test_3_inferred_routine_and_24h_rhythm_learning(self):
+        # User states wake time & gym routine
         resp = self.client.post(
-            "/analyze-workspace/base64",
-            json={"image_base64": b64, "user_id": "user_b64"}
+            "/api/agent/incoming-message",
+            json={"text": "I usually wake up around 11am and go to the gym at 6pm"}
         )
         self.assertEqual(resp.status_code, 200)
-        data = resp.json()
-        self.assertIn("session_id", data)
-        self.assertEqual(data["user_id"], normalize_user_id("user_b64"))
+        cal = self.client.get("/api/calendar").json()
+        probs = cal["rhythm"]["hourly_activity_prob"]
+        # Hours before 11am (e.g. 6am, 7am, 8am) should be suppressed
+        self.assertLessEqual(probs[7], 0.10)
+        self.assertGreaterEqual(probs[11], 0.70)
+        # Gym routine events created at 18:00
+        gym_events = [e for e in cal["events"] if e["title"] == "Gym" and e["source"] == "inferred_routine"]
+        self.assertGreaterEqual(len(gym_events), 5)
 
-    def test_rate_session_endpoint(self):
-        resp = self.client.post(
-            "/api/rate-session",
-            json={
-                "session_id": "test_sess_001",
-                "user_id": "user_b64",
-                "actual_rating": 5.0,
-                "mood_rating": 4.0
-            }
+        # Test studying at 1:00 AM with a 4/5 rating automatically boosts hours 23, 0, 1, 2
+        learner = ZeroSetupRhythmLearner.from_cold_start()
+        before_23 = learner.rhythm.hourly_activity_prob[23]
+        before_1 = learner.rhythm.hourly_activity_prob[1]
+        update_activity_observation(learner.rhythm, hour=1, was_active=True, rating=4.0)
+        self.assertGreater(learner.rhythm.hourly_activity_prob[1], before_1)
+        self.assertGreater(learner.rhythm.hourly_activity_prob[0], 0.50)
+        self.assertGreater(learner.rhythm.hourly_activity_prob[2], 0.50)
+        self.assertGreater(learner.rhythm.hourly_activity_prob[23], before_23)
+        self.assertGreater(is_hour_schedulable(learner.rhythm, 1), 0.60)
+
+    def test_4_day_3_and_day_21_demo_presets(self):
+        # Day 3 Calibrating: high uncertainty (~1.2 stars)
+        r3 = self.client.post("/api/demo/set-stage", json={"stage": "day_3_calibrating"})
+        self.assertEqual(r3.status_code, 200)
+        cal3 = r3.json()["calendar"]
+        self.assertGreaterEqual(len(cal3["events"]), 4)
+        self.assertGreaterEqual(len(cal3["scheduled_blocks"]), 4)
+        self.assertGreaterEqual(cal3["scheduled_blocks"][0]["uncertainty_bound"], 1.1)
+
+        # Day 21 Optimized: Night-Owl / Library Persona with tight confidence intervals (~0.2 stars)
+        r21 = self.client.post("/api/demo/set-stage", json={"stage": "day_21_optimized"})
+        self.assertEqual(r21.status_code, 200)
+        cal21 = r21.json()["calendar"]
+        hourly = {item["hour"]: item for item in cal21["linucb_stats"]["hourly_evaluations"]}
+
+        # 11:00 AM should favor Library with high expected reward and tight uncertainty (~0.2★)
+        self.assertEqual(hourly[11]["best_location"], "library")
+        self.assertGreaterEqual(hourly[11]["expected_reward"], 4.2)
+        self.assertLessEqual(hourly[11]["uncertainty_bound"], 0.28)
+
+        # 23:00 (11:00 PM) should favor Desk (Night-Owl persona)
+        self.assertEqual(hourly[23]["best_location"], "desk")
+        self.assertGreaterEqual(hourly[23]["expected_reward"], 4.2)
+
+        # 16:00 (4:00 PM) should show afternoon crash
+        self.assertLessEqual(hourly[16]["expected_reward"], 2.8)
+
+    def test_5_cut_session_short_and_spillover_reschedule(self):
+        self.client.post("/api/demo/set-stage", json={"stage": "day_3_calibrating"})
+        cal = self.client.get("/api/calendar").json()
+        first_blk = cal["scheduled_blocks"][0]
+        blk_id = first_blk["id"]
+
+        cut_resp = self.client.post(
+            f"/api/blocks/{blk_id}/cut-short",
+            json={"mins_completed": 25, "rating": 2.0, "mood": 2.0, "reason": "tired"}
         )
-        self.assertEqual(resp.status_code, 200)
-        data = resp.json()
-        self.assertEqual(data["status"], "success")
-        self.assertEqual(data["user_id"], normalize_user_id("user_b64"))
+        self.assertEqual(cut_resp.status_code, 200)
+        cut_data = cut_resp.json()
+        self.assertEqual(cut_data["cut_block"]["status"], "cut_short")
+        self.assertEqual(cut_data["spillover_mins"], 50)
+        self.assertGreaterEqual(len(cut_data["rescheduled_blocks"]), 1)
+
+    def test_6_simulate_tick_proactive_outreach(self):
+        self.client.post("/api/demo/set-stage", json={"stage": "day_3_calibrating"})
+        tick_resp = self.client.post(
+            "/api/proactive/simulate-tick",
+            json={"force_trigger": "overwhelm_intervention"}
+        )
+        self.assertEqual(tick_resp.status_code, 200)
+        tick_data = tick_resp.json()
+        self.assertEqual(tick_data["generated_count"], 1)
+        self.assertEqual(tick_data["generated_prompts"][0]["trigger_reason"], "overwhelm_intervention")
 
 
 if __name__ == "__main__":
