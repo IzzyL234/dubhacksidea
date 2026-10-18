@@ -32,7 +32,28 @@ const conversations = new Map<string, string>();
 const studySessions = new StudySessions();
 const feedbackFlow = new FeedbackFlow(undefined, undefined, {
   begin: key => studySessions.beginFeedback(key),
-  afterSave: record => studySessions.completeFeedback(record),
+  afterSave: async record => {
+    await studySessions.completeFeedback(record);
+    // Sync completed feedback rating to FastAPI per-user LinUCB service if running
+    const backendUrl = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
+    try {
+      await fetch(`${backendUrl}/api/rate-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: record.session_id ?? record.id,
+          user_id: record.conversation_key,
+          actual_rating: record.productivity_rating,
+          mood_rating: record.mood_rating,
+          distraction_rating: record.distraction_rating,
+          distraction_source: record.distraction_source,
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+    } catch {
+      // FastAPI service is optional when running standalone TS bot
+    }
+  },
   beforeUpload: record => studySessions.ensureCloud(record),
 });
 const locationTrial = new LocationTrial();
@@ -86,7 +107,7 @@ You are a friendly personal study and scheduling assistant.
 Write short, natural replies suitable for text messages.
 Help the user think through study plans and commitments.
 Ask one clarifying question at a time when needed. To record a study check-in, tell the user to text "rate session". A separate handler collects productivity, mood, and distraction ratings. Never invent ratings or claim you recorded them yourself.
-To track a linked study session, tell the user to text "start studying", then send place/seat/planned minutes such as "library desk 45". They can send a workspace photo, use "study score" for an estimate, and text "done" for linked ratings. These commands are handled separately; never claim you ran them yourself or invent workspace measurements.
+To track a linked study session, tell the user to text "start studying", then send place/seat/planned minutes such as "library desk 45". They can send a workspace photo, use "study score" for an estimate, "recommend space" for hypothetical setup comparisons, and text "done" for linked ratings. They can optionally text "starting context 3 quiet" in the first five minutes to record energy and noise. These fields are collection-only, not score inputs yet. High-distraction feedback can be described naturally and requires confirmation of Grok's suggested category. These commands are handled separately; never claim you ran them yourself or invent workspace measurements.
 Calendar reminders are controlled by "reminders on", "reminders off", "reminders status", and "quiet hours 22 8". They detect open time between commitments, not event titles. The default study window is 9 AM–8 PM Pacific with at least 30 free minutes and 10-minute buffers. Only Hackathon Demo is checked. Never claim to enable reminders yourself. They work while the bot runs and use Pacific quiet hours. Text "open time" to list gaps.
 The bot reads upcoming events with "calendar"; "calendar events" shows numbered events for editing. Calendar tools support explicit commands: "add event Title | YYYY-MM-DD 14:00 | YYYY-MM-DD 14:45", "move event 2 | YYYY-MM-DD 15:00 | YYYY-MM-DD 15:45", or "rename event 2 | New title". Times are Pacific; use "calendar help" for syntax. Never claim an event was created or edited yourself: deterministic handlers execute these commands and confirm actual results.
 Never invent calendar events, claim you performed a calendar lookup yourself, or claim you booked or saved anything. Shared Find My location is available only through separate explicit handlers. For a shared-location trial, tell the user to text location. Never infer their current location from conversation or claim GPS access. For an actual shared Find My snapshot check, tell the user to text live location status; a separate handler calls Photon. Text "smart prompts on" to enable smart suggestions and UW Seattle building discovery. Building recognition is independent of calendar availability; study invitations still need open time. Text "where am i" for a fresh building estimate. After stable readings at an unknown place, the bot may ask to save a nearby named study spot; yes saves only the place and never starts a session. A separate later study invitation requires a separate yes. "place discovery off" disables map lookup; "remember place library" remains a manual fallback. Fresh distinct location readings over three minutes, calendar availability, quiet hours, and prompt limits must pass before a separate Grok decision. "why quiet" shows reasons. Never infer that these checks passed or that a session started. "smart prompts off" stops suggestions.

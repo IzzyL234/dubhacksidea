@@ -5,13 +5,20 @@
   "type": "module",
   "scripts": {
     "start": "bun src/index.ts",
-    "dev": "bun --watch src/index.ts"
+    "dev": "bun --watch src/index.ts",
+    "backend": "python3 analyze_workspace.py",
+    "photon": "node --experimental-transform-types --env-file-if-exists=.env bridge/photon.mjs",
+    "test": "python3 -m unittest test_backend.py",
+    "start:node": "node --experimental-transform-types --env-file-if-exists=.env src/index.ts",
+    "test:bot": "bun test tests"
   },
   "dependencies": {
     "@google-cloud/local-auth": "^3.0.1",
     "@photon-ai/advanced-imessage": "2.3.0",
     "googleapis": "^186.0.0",
-    "spectrum-ts": "^12.11.0"
+    "spectrum-ts": "^12.11.0",
+    "@photon-ai/imessage-kit": "3.0.0",
+    "@spectrum-ts/imessage": "^12.11.0"
   },
   "devDependencies": {
     "typescript": "^5",
