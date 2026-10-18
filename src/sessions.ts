@@ -262,7 +262,7 @@ export class StudySessions {
       const doc=await this.read(key);
       const session=doc.sessions.find(s=>s.status==="active" || s.status==="awaiting_feedback");
       if (!session) return null;
-      if (session.status==="active") { session.status="awaiting_feedback"; session.ended_at=new Date(this.now()).toISOString(); }
+      if (session.status==="active") { session.status="awaiting_feedback"; session.ended_at=new Date(this.now()).toISOString();if(session.duration_mins===null)session.duration_mins=Math.round((Date.parse(session.ended_at)-Date.parse(session.started_at))/60000*100)/100; }
       await this.save(key,doc); return session.id;
     });
   }
@@ -341,10 +341,10 @@ export class StudySessions {
         reply=session?"Session discarded. It won't train your model.":"No unfinished study session.";
       } else if(command==="study status") {
         const session=active??waiting;
-        reply=session?`Session ${session.status.replaceAll("_"," ")}: ${session.location??"place not set"}, ${session.study_space??"seat not set"}, ${session.duration_mins??"?"} planned minutes. Starting energy ${session.starting_energy??"unknown"}/5; noise ${session.starting_noise??"unknown"}. ${sessionContext(session)?"Context ready for learning.":"Context incomplete; send your place/seat/minutes and a photo or workspace details."}`:"No unfinished study session. Text start studying.";
+        reply=session?`Session ${session.status.replaceAll("_"," ")}: ${session.location??"place not set"}, ${session.study_space??"seat not set"}, ${Math.max(0,Math.round(((session.ended_at?Date.parse(session.ended_at):this.now())-Date.parse(session.started_at))/60000))} minutes elapsed. Starting energy ${session.starting_energy??"unknown"}/5; noise ${session.starting_noise??"unknown"}. ${sessionContext(session)?"Context ready for learning.":"Your session is tracked even when some workspace details are unknown."}`:"No unfinished study session. Text start studying.";
       } else if(command==="study score") {
         if(!active) reply="Start a study session first.";
-        else if(!sessionContext(active)) reply="I need complete workspace context first. Send a photo or text workspace bright 3 7 (lighting, clutter 1–10, comfort 1–10).";
+        else if(!sessionContext(active)) reply=active.environment_source?await this.photoPrediction(key,active,doc):"Send a workspace photo first so I can analyze your setup.";
         else reply=await this.score(key,active,doc);
       } else if(isStudyRecommendation(command)) {
         reply=await this.personalRecommendation(key,doc);
@@ -352,11 +352,11 @@ export class StudySessions {
         reply=await this.personalRecommendation(key,doc);
       } else if(active) {
         const parts=command.split(/\s+/);
-        if((parts.length===3||(parts.length===2&&active.duration_mins!==null)) && LOCATIONS.includes(parts[0] as any) && SPACES.includes(parts[1] as any)) {
-          const duration=parts.length===3?Number(parts[2]):active.duration_mins!;
-          if(!Number.isInteger(duration)||duration<5||duration>240)reply="Use planned minutes from 5 to 240.";
+        if((parts.length===3||parts.length===2) && LOCATIONS.includes(parts[0] as any) && SPACES.includes(parts[1] as any)) {
+          const duration=parts.length===3?Number(parts[2]):active.duration_mins;
+          if(duration!==null&&(!Number.isInteger(duration)||duration<5||duration>240))reply="Use planned minutes from 5 to 240.";
           else {active.location=parts[0] as Context["location"];active.study_space=parts[1] as Context["study_space"];active.duration_mins=duration;
-            reply=sessionContext(active)?"Workspace context saved. "+await this.score(key,active,doc):active.environment_source?"Photo details are saved. Please rate your seating comfort from 1-10, for example comfort 7.":"Context saved. Please send a photo of your workspace for analysis. If a photo isn't possible, use workspace bright 3 7 for self-reported lighting, clutter and comfort.";}
+            reply=sessionContext(active)?"Workspace context saved. "+await this.score(key,active,doc):active.environment_source?"Photo details are saved. I’m timing your session—you don’t need to plan the minutes. Text done when finished.":"Context saved. Please send a photo of your workspace for analysis. If a photo isn't possible, use workspace bright 3 7 for self-reported lighting, clutter and comfort.";}
         } else if(command.startsWith("workspace ")) {
           try {if(parts.length!==4)throw new Error();
             const environment=validateWorkspace({lighting:parts[1],clutter_score:Number(parts[2]),ergonomics:Number(parts[3])});
@@ -366,7 +366,7 @@ export class StudySessions {
         } else if(/^comfort [1-9]$|^comfort 10$/.test(command)) {
           active.environment.ergonomics=Number(parts[1]);
           active.environment_source=active.environment_source==="perceptron"?"mixed":active.environment_source??"self_report";
-          reply=sessionContext(active)?"Comfort saved. "+await this.score(key,active,doc):"Comfort saved. Please send your place, seat and planned minutes, for example library desk 45.";
+          reply=sessionContext(active)?"Comfort saved. "+await this.score(key,active,doc):"Comfort saved. I’m timing your session; text done when finished.";
         }
       }
       if(reply!==null){doc.replies=[...doc.replies,{id:messageId,text:reply}].slice(-40);await this.save(key,doc);}
@@ -381,7 +381,7 @@ export class StudySessions {
       if(!session)return "Text start studying before sending a workspace photo.";
       if(!photoAttachment(mime))return "Please send a workspace photo (iPhone HEIC, JPEG, PNG, or WebP).";
       const environment=await this.vision(await read(),mime);
-      session.environment=environment;session.environment_source="perceptron";
+      session.environment=environment;session.environment_source="perceptron";if(environment.study_space)session.study_space=environment.study_space;
       await this.appendPhotoLog({
         id: messageId,
         user_id: key,
@@ -393,11 +393,10 @@ export class StudySessions {
         perceptron_tags: environment,
         source: "perceptron",
       });
-      const interpretation=`Your workspace looks ${environment.lighting==="bright"?"bright":"dim"} and ${environment.clutter_score<=3?"fairly clear":environment.clutter_score<=6?"a little cluttered":"quite cluttered"}. ${environment.lighting==="dim"?"A little more light may make it easier to see your work.":environment.clutter_score>=7?"Clearing a small area could give you more room to work.":"How does this setup feel to you?"}`;
-      let reply=interpretation+`\n\nPerceptron estimates: ${environment.lighting} lighting, clutter ${environment.clutter_score}/10.${environment.ergonomics===null?" I couldn't assess seating/posture. Reply comfort 7 with your comfort from 1-10.":` Visible ergonomics ${environment.ergonomics}/10.`} You can correct these with workspace bright 3 7.`;
-      if(sessionContext(session))reply+=" "+await this.score(key,session,doc);
-      else if(!session.location||!session.study_space||session.duration_mins===null)reply+=" I still need your place, seat and planned minutes to use these features in your study model. For example: library desk 45.";
-      reply+=" Text done when finished.";
+      const interpretation=`Your workspace looks ${environment.lighting==="bright"?"bright":"dim"} and ${environment.clutter_score<=3?"fairly clear":environment.clutter_score<=6?"a little cluttered":"quite cluttered"}. ${environment.lighting==="dim"?"A little more light may make it easier to see your work.":environment.clutter_score>=7?"Clearing a small area could give you more room to work.":"You’ve got room to get started."}`;
+      let reply=`📸 ${interpretation}\n💡 Lighting: ${environment.lighting}\n🧹 Clutter: ${environment.clutter_score}/10 (lower is clearer)\n🪑 Visible ergonomics: ${environment.ergonomics===null?"not clear enough to assess":environment.ergonomics+"/10"}`;
+      reply+="\n\n"+await this.photoPrediction(key,session,doc);
+      reply+="\n⏱️ I’m timing your session. Text done when you finish—I’ll calculate the elapsed minutes.";
       doc.replies=[...doc.replies,{id:messageId,text:reply}].slice(-40);await this.save(key,doc);return reply;
     });
   }
@@ -430,6 +429,14 @@ export class StudySessions {
       const {learner,contexts,personal,cloudUnavailable}=await this.buildPersonalLearner(key,doc,false,false);
       return studyOptions(learner,contexts,place,freeMinutes,personal,cloudUnavailable,this.now());
     });
+  }
+  private async photoPrediction(key:string,current:StudySession,doc:Document):Promise<string>{
+    if(sessionContext(current))return "📈 "+await this.score(key,current,doc);
+    const {learner,contexts,personal,cloudUnavailable}=await this.buildPersonalLearner(key,doc,false,false);
+    if(!contexts.length)return "📈 Personal prediction: I don’t have enough completed sessions with workspace details yet. The photo numbers above are visual estimates, not learned productivity ratings."+(cloudUnavailable?" Cloud history is unavailable right now.":"");
+    const profiles=contexts.slice(-5);const predictions=profiles.map(c=>learner.predict({...c,timestamp:new Date(this.now()).toISOString(),location:current.location??c.location,study_space:current.study_space??c.study_space,duration_mins:current.duration_mins??c.duration_mins,environment:{clutter_score:current.environment.clutter_score!,lighting:current.environment.lighting!,ergonomics:current.environment.ergonomics??c.environment.ergonomics}}));
+    const range=(key:"predictedProductivity"|"predictedMood")=>{const values=predictions.map(p=>p[key]);const lo=Math.min(...values).toFixed(1),hi=Math.max(...values).toFixed(1);return lo===hi?lo:lo+"–"+hi;};
+    return `📈 Based on ${personal} of your completed sessions:\n🎯 Estimated productivity: ${range("predictedProductivity")}/5\n🙂 Estimated mood: ${range("predictedMood")}/5\nThese compare your photo with previous setups, using historical values for missing place, seating, comfort or duration. They’re uncertain estimates, not a measurement of today’s productivity.`+(cloudUnavailable?" Cloud history unavailable; local feedback only.":"");
   }
   private async score(key:string,current:StudySession,doc:Document):Promise<string>{
     const {learner,rows,personal,cloudUnavailable}=await this.buildPersonalLearner(key,doc);

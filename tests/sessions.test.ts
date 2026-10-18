@@ -50,7 +50,7 @@ test("session and check-in remain linked through restarts, duplicate messages, a
   expect(score).toContain("1 of your linked check-ins");
   expect(await make().handle("a","study score","score2")).toBe(score);
   await restarted.handle("b","start studying","startb");
-  expect(await restarted.handle("b","study score","scoreb")).toContain("complete workspace context");
+  expect(await restarted.handle("b","study score","scoreb")).toContain("workspace photo first");
 });
 test("photos attach once to the active session; missing visual posture is not fabricated",async()=>{
   const {root,sessions}=await setup();let reads=0;
@@ -58,7 +58,7 @@ test("photos attach once to the active session; missing visual posture is not fa
   expect(await sessions.photo("a","photo","image/jpeg",read)).toContain("start studying");
   await sessions.handle("a","start studying","start");
   await sessions.handle("a","library desk 45","details");
-  expect(await sessions.photo("a","photo","image/jpeg",read)).toContain("couldn't assess");
+  expect(await sessions.photo("a","photo","image/jpeg",read)).toContain("not clear enough to assess");
   await sessions.photo("a","photo","image/jpeg",read);expect(reads).toBe(1);
   expect((await document(root)).sessions[0]?.environment.ergonomics).toBeNull();
   await sessions.handle("a","comfort 7","comfort");
