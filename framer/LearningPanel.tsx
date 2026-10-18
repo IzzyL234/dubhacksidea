@@ -35,7 +35,7 @@ type Props = {
     surface: string
     style?: React.CSSProperties
 }
-const human = (s: string) => s.replaceAll("_", " ").replaceAll(":", ": ")
+const human = (s: unknown) => (typeof s === "string" && s.trim() ? s : "Unspecified").replaceAll("_", " ").replaceAll(":", ": ")
 const when = (s: string | null) =>
     s
         ? new Date(s).toLocaleString(undefined, {
@@ -379,7 +379,10 @@ export default function LearningPanel({
                                 {[
                                     [
                                         "Training observations",
-                                        String(data.model.totalObservations ?? data.model.observations),
+                                        String(
+                                            data.model.totalObservations ??
+                                                data.model.observations
+                                        ),
                                     ],
                                     [
                                         "Productivity estimate",
@@ -589,7 +592,9 @@ export default function LearningPanel({
                                 </summary>
                                 <p style={muted}>
                                     {data.model.algorithm} ·{" "}
-                                    {data.model.totalObservations ?? data.model.observations} training observations.
+                                    {data.model.totalObservations ??
+                                        data.model.observations}{" "}
+                                    training observations.
                                 </p>
                                 {weights.map((w) => (
                                     <div
