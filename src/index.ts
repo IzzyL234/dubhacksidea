@@ -1,3 +1,4 @@
+import { LocationTrial } from "./location.ts";
 import { FeedbackFlow } from "./feedback.ts";
 import { getUpcomingCalendarReply, isUpcomingRequest } from "./calendar.ts";
 import { Spectrum } from "spectrum-ts";
@@ -18,6 +19,7 @@ const app = await Spectrum({
 // Keep each conversation separate. Restarting the bot resets this memory.
 const conversations = new Map<string, string>();
 const feedbackFlow = new FeedbackFlow();
+const locationTrial = new LocationTrial();
 let feedbackSyncRunning = false;
 async function retryFeedbackSync() {
   if (feedbackSyncRunning) return;
@@ -38,7 +40,7 @@ Write short, natural replies suitable for text messages.
 Help the user think through study plans and commitments.
 Ask one clarifying question at a time when needed. To record a study check-in, tell the user to text "rate session". A separate handler collects productivity, mood, and distraction ratings. Never invent ratings or claim you recorded them yourself.
 The bot can read the next five events from Hackathon Demo when the user texts "What's coming up?" or "calendar". For other calendar questions, ask them to use that command. You cannot create or change events yet.
-Never invent calendar events, claim you performed a calendar lookup yourself, or claim you booked or saved anything.
+Never invent calendar events, claim you performed a calendar lookup yourself, or claim you booked or saved anything. You cannot access live phone location. For a shared-location trial, tell the user to text location. Never infer their current location from conversation or claim GPS access.
 `;
 
 type GrokResponse = {
@@ -51,6 +53,17 @@ type GrokResponse = {
 };
 
 for await (const [space, message] of app.messages) {
+  if (message.direction === "outbound") continue;
+  const locationInput = message.content.type === "text" ? message.content.text
+    : message.content.type === "richlink" ? message.content.url : null;
+  if (locationInput !== null) {
+    const locationReply = locationTrial.handle(space.id, locationInput);
+    if (locationReply !== null) {
+      try { await space.send(locationReply); }
+      catch { console.error("Could not send location trial reply."); }
+      continue;
+    }
+  }
   if (message.content.type !== "text") continue;
 
   const incoming = message.content.text.trim();
