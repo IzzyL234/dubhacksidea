@@ -1,3 +1,4 @@
+import { LocationDiagnostics } from "./location-diagnostics.ts";
 import { LocationTrial } from "./location.ts";
 import { StudySessions } from "./sessions.ts";
 import { inboundMessages } from "./inbound.ts";
@@ -30,6 +31,7 @@ const feedbackFlow = new FeedbackFlow(undefined, undefined, {
   beforeUpload: record => studySessions.ensureCloud(record),
 });
 const locationTrial = new LocationTrial();
+const locationDiagnostics = new LocationDiagnostics();
 const messaging = imessage(app);
 const calendarCommands = new CalendarCommands(demoCalendar);
 const reminders = new StudyReminders({
@@ -89,6 +91,15 @@ type GrokResponse = {
 for await (const [space, envelope] of app.messages) {
   for (const message of inboundMessages(envelope)) {
   if (message.direction === "outbound") continue;
+  locationDiagnostics.observe(space.id, message.id, message.content);
+  if (message.content.type === "text") {
+    const diagnosticReply = locationDiagnostics.handle(space.id, message.content.text);
+    if (diagnosticReply !== null) {
+      try { await space.send(diagnosticReply); }
+      catch { console.error("Could not send location test reply."); }
+      continue;
+    }
+  }
   if (message.content.type === "attachment") {
     try {
       const attachment = message.content;
