@@ -2,7 +2,7 @@
 
 The running TypeScript bot uses xAI by default for chat, calendar interpretation, confirmed context extraction and proactive decisions. Set `AI_PROVIDER=gemini` to use Gemini for all those roles instead. Perceptron remains the workspace-photo extractor. See `.env.example` for public placeholders; credentials stay in private environment configuration.
 
-LinUCB rebuilds from completed, correctly linked real feedback in Supabase and local history. It provides productivity/mood estimates, uncertainty and feasible session options. The coordinator also receives confirmed optional sentiment/social tags and authoritative current session state. Confirmed notes influence coordinator reasoning; they do not overwrite ratings or add numerical LinUCB features. Demo seeds are excluded from live proactive choices.
+LinUCB rebuilds from completed, correctly linked real feedback in Supabase and local history. It provides productivity/mood estimates, uncertainty and feasible session options. The coordinator also receives confirmed optional sentiment/social tags and authoritative current session state. Confirmed notes influence coordinator reasoning; they do not overwrite ratings or add numerical LinUCB features. Demo and real examples now share equal base weight in the configured combined learner, with separate counts. Synthetic examples are not personal experience; location comparisons still require known real profiles. See `CONTINUOUS_LEARNING.md`.
 
 The event-triggered loop watches location, calendar, learning, confirmed notes, preferences and session changes. Persistent memory avoids model calls for unchanged one-minute polls. See `COORDINATOR_RUNTIME.md` for limits, retry behavior, privacy and the requirement to keep the computer awake.
 
