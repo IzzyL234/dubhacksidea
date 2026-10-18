@@ -1,3 +1,4 @@
+import { getPhotonLocationStatus } from "./photon-location.ts";
 import { LocationDiagnostics } from "./location-diagnostics.ts";
 import { LocationTrial } from "./location.ts";
 import { StudySessions } from "./sessions.ts";
@@ -76,7 +77,7 @@ Ask one clarifying question at a time when needed. To record a study check-in, t
 To track a linked study session, tell the user to text "start studying", then send place/seat/planned minutes such as "library desk 45". They can send a workspace photo, use "study score" for an estimate, and text "done" for linked ratings. These commands are handled separately; never claim you ran them yourself or invent workspace measurements.
 Calendar reminders are controlled by "reminders on", "reminders off", "reminders status", and "quiet hours 22 8". They detect open time between commitments, not event titles. The default study window is 9 AM–8 PM Pacific with at least 30 free minutes and 10-minute buffers. Only Hackathon Demo is checked. Never claim to enable reminders yourself. They work while the bot runs and use Pacific quiet hours. Text "open time" to list gaps.
 The bot reads upcoming events with "calendar"; "calendar events" shows numbered events for editing. Calendar tools support explicit commands: "add event Title | YYYY-MM-DD 14:00 | YYYY-MM-DD 14:45", "move event 2 | YYYY-MM-DD 15:00 | YYYY-MM-DD 15:45", or "rename event 2 | New title". Times are Pacific; use "calendar help" for syntax. Never claim an event was created or edited yourself: deterministic handlers execute these commands and confirm actual results.
-Never invent calendar events, claim you performed a calendar lookup yourself, or claim you booked or saved anything. You cannot access live phone location. For a shared-location trial, tell the user to text location. Never infer their current location from conversation or claim GPS access.
+Never invent calendar events, claim you performed a calendar lookup yourself, or claim you booked or saved anything. You cannot access live phone location. For a shared-location trial, tell the user to text location. Never infer their current location from conversation or claim GPS access. For an actual shared Find My snapshot check, tell the user to text live location status; a separate handler calls Photon. Never claim continuous tracking or automatic arrival detection is enabled.
 `;
 
 type GrokResponse = {
@@ -91,6 +92,11 @@ type GrokResponse = {
 for await (const [space, envelope] of app.messages) {
   for (const message of inboundMessages(envelope)) {
   if (message.direction === "outbound") continue;
+  if (message.content.type === "text" && /^(?:live location status|location api status)[.!?]*$/i.test(message.content.text.trim())) {
+    try { await space.send(message.sender?.id ? await getPhotonLocationStatus(message.sender.id) : "I couldn't identify the sender for a location lookup."); }
+    catch { console.error("Could not send the location status reply."); }
+    continue;
+  }
   locationDiagnostics.observe(space.id, message.id, message.content);
   if (message.content.type === "text") {
     const diagnosticReply = locationDiagnostics.handle(space.id, message.content.text);

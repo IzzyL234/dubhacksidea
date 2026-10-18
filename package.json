@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@google-cloud/local-auth": "^3.0.1",
+    "@photon-ai/advanced-imessage": "2.3.0",
     "googleapis": "^186.0.0",
     "spectrum-ts": "^12.11.0"
   },
