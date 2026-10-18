@@ -10,3 +10,18 @@ test("source label alone cannot turn a missing coordinate into a valid live loca
   const reply=locationStatus({locationType:"live",isLocatingInProgress:true});
   expect(reply).toContain("not available yet");expect(reply).toContain("still locating");expect(reply).toContain("doesn't confirm continuous");
 });
+
+test("provider failures do not falsely blame sharing or reveal raw SDK errors",async()=>{
+ const {getPhotonLocationStatus,PhotonLocationError}=await import('../src/photon-location.ts');
+ const reply=await getPhotonLocationStatus('+15555550123',async()=>{throw new PhotonLocationError('service_error');});
+ expect(reply).toContain("doesn't prove location sharing stopped");expect(reply).toContain("haven't checked your building");expect(reply).not.toContain('15555550123');
+});
+test("sanitized categories distinguish missing sharing, authentication, timeout and service errors",async()=>{
+ const {locationFailureKind,locationFailureReply}=await import('../src/photon-location.ts');
+ expect(locationFailureKind({code:'internalError',message:'private raw payload'})).toBe('service_error');
+ expect(locationFailureKind({code:'sharedFriendLocationNotFound'})).toBe('not_shared');
+ expect(locationFailureKind({code:'tokenExpired'})).toBe('authentication');
+ expect(locationFailureKind({grpcCode:4})).toBe('timeout');
+ expect(locationFailureReply({code:'internalError',message:'private raw payload'})).not.toContain('private raw payload');
+ expect(locationFailureReply({code:'sharedFriendLocationNotFound'})).toContain('Check Find My');
+});

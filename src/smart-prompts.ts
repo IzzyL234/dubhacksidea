@@ -1,3 +1,4 @@
+import {locationFailureReply,locationFailureKind} from "./photon-location.ts";
 import {matchesCampusPlace} from "./uw-buildings.ts";
 import {chooseNearby,type NearbyPlace} from "./nearby-places.ts";
 import { createHash,randomUUID } from "node:crypto";
@@ -60,7 +61,7 @@ export class SmartPrompts {
       const state=await this.read(key);let reply:string;
       if(["where am i","campus location","detect building"].includes(command)){
         if(!address||!this.deps.lookup)return "Campus lookup isn't connected.";
-        let reading;try{reading=freshReading(await this.deps.read(address),this.now());}catch{return "I couldn't read your shared location. Text live location status.";}
+        let reading;try{reading=freshReading(await this.deps.read(address),this.now());}catch(error){return locationFailureReply(error);}
         if(!reading)return "Your shared location needs a fresh timestamp and accuracy of 100 meters or better.";
         const places=await this.deps.lookup(reading),place=places.length===1?places[0]:null;
         return place?`Your latest location is near UW's ${place.name}. This is a building estimate; nothing was saved and no session started. Building data: UW Engineering Services.`:"I couldn't identify a clear UW Seattle building from your latest location. GPS may be between buildings or too imprecise.";
@@ -68,7 +69,7 @@ export class SmartPrompts {
         const label=command.slice("remember place ".length) as Label;
         if(!labels.includes(label))return "Use remember place library (or cafe, home, dorm_room, classroom) while physically there.";
         if(!address)return "I couldn't identify your iMessage address.";
-        let point;try{point=freshReading(await this.deps.read(address),this.now());}catch{return "I couldn't read your shared location. Check live location status first.";}
+        let point;try{point=freshReading(await this.deps.read(address),this.now());}catch(error){return locationFailureReply(error);}
         if(!point)return "I need a location captured within 2 minutes with reported accuracy of 100 meters or better. Wait for a fresh location and try again.";
         state.places=state.places.filter(p=>p.label!==label);state.places.push({label,latitude:point.latitude,longitude:point.longitude,radius:200});
         this.samples.delete(key);delete state.offer;state.reviewAfter=0;
@@ -98,7 +99,7 @@ export class SmartPrompts {
   }
   private async presence(key:string,state:State):Promise<Presence|string>{
     if(!state.address)return "sender_not_connected";
-    let reading;try{reading=freshReading(await this.deps.read(state.address),this.now());}catch{this.samples.delete(key);return "location_unavailable";}
+    let reading;try{reading=freshReading(await this.deps.read(state.address),this.now());}catch(error){this.samples.delete(key);return `location_${locationFailureKind(error)}`;}
     if(!reading){this.samples.delete(key);return "location_stale_or_inaccurate";}
     const place=state.places.find(p=>atPlace(p,reading));
     if(!place)return this.discover(key,state,reading);
