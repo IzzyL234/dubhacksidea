@@ -1,3 +1,4 @@
+import {ReviewLinks} from './review-links.ts';
 import {liveCalendarView} from "./live-calendar-web.ts";
 import {learningDashboard} from "./learning-web.ts";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -22,6 +23,8 @@ const WRITE_TOKEN_FILE = process.env.GOOGLE_CALENDAR_WRITE_TOKEN_FILE || join(RO
 const PORT = Number(process.env.PORT || 3000);
 const BACKEND_URL = (process.env.BACKEND_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
 const FRONTEND_URL = (process.env.FRONTEND_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
+
+const privateReviews=new ReviewLinks(demoCalendar,process.env.SCHEDULE_REVIEW_DIRECTORY??join(ROOT_DIR,'data','schedule-reviews'));
 
 const stagedEngine = new StagedProposalEngine(
   demoCalendar,
@@ -444,6 +447,20 @@ export async function handleWebRequest(req: IncomingMessage, res: ServerResponse
   const pathname = url.pathname;
   const method = (req.method || "GET").toUpperCase();
 
+  const reviewMatch=pathname.match(/^\/api\/learning\/reviews\/([a-f0-9]{16})(?:\/(approve|deny))?$/);
+  if(reviewMatch){
+    const respond=(status:number,value:unknown)=>new Response(JSON.stringify(value),{status,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});
+    let response:Response;
+    if(method!=="GET"&&method!=="POST")response=respond(405,{error:"Method unavailable."});
+    else if((method==="POST")!==Boolean(reviewMatch[2]))response=respond(405,{error:"Use the review's explicit approval or denial action."});
+    else if(req.headers.origin&&req.headers.origin!==FRONTEND_URL)response=respond(403,{error:"Open the review on the Daywise website."});
+    else response=await privateReviews.request(reviewMatch[1]!,req.headers.authorization??'',reviewMatch[2] as 'approve'|'deny'|undefined);
+    res.writeHead(response.status,Object.fromEntries(response.headers));res.end(await response.text());return;
+  }
+  if(/^\/review\/[a-f0-9]{16}$/.test(pathname)&&method==='GET'){
+    res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});
+    res.end(await readFile(join(FRONTEND_DIR,'review.html')));return;
+  }
   if(pathname==="/api/learning/dashboard"){
     const response=method==="GET"?await learningDashboard(req.headers.authorization):new Response(JSON.stringify({error:"Read-only endpoint."}),{status:405,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});
     res.writeHead(response.status,Object.fromEntries(response.headers));res.end(await response.text());return;
