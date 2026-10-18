@@ -1,0 +1,11 @@
+# Continuous learning
+
+The TypeScript bot combines all 40 synthetic demo examples with the current user's valid, completed, linked real feedback. Demo and real examples each have base weight 1. The existing confirmed-interruption adjustment still reduces only the affected real session's influence; ratings themselves are unchanged. Demo IDs are namespaced and counts are displayed separately.
+
+A saved check-in immediately rebuilds that user's model from history. Each new workspace photo reads the latest combined model. Photo input alone does not supply an outcome or train the model. Unknown location, seating, lighting, clutter, ergonomics and duration use explicit missingness indicators rather than guessed values. Partial sessions can teach overall associations but cannot establish a specific location's effectiveness. Known workspace profiles remain required for location comparisons.
+
+At startup and after the Pacific calendar date changes, the running bot rebuilds models from saved history. The daily ledger survives restarts. Network/export failures retry after five minutes. There is no host-level scheduled task: the computer must remain awake with the bot running; a missed daily run happens on the next start. Rebuilds replay each feedback ID once and use local corrections in preference to stale cloud copies.
+
+Local model caches and successful cloud-history snapshots are stored under the private, gitignored sessions directory. Cloud outages retain the cached history. The expanded feature vector has 19 values: the original 13 plus six missingness indicators. Old parameter caches are not authoritative; they are rebuilt from raw examples and feedback. TypeScript model exports use the `study-ts-v2:` user-ID namespace so they do not overwrite the alternate Python model's incompatible parameter format. No new cloud columns are required for these parameter exports. Existing session/feedback lifecycle migrations are still required for cloud sync.
+
+Use `learning status` or `model status` in the bot to see the real, demo and partial-context counts. Real sessions without linked feedback, canceled sessions, cross-user records and malformed examples remain excluded. Fractional elapsed minutes remain in local records and timestamps; the integer cloud duration field is rounded for upload.
