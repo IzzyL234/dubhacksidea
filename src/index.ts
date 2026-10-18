@@ -1,3 +1,4 @@
+import {createInboundDispatch} from "./inbound-dispatch.ts";
 import {InboxRecovery,photonInboxList} from "./inbox-recovery.ts";
 import {DailyBrief} from "./daily-brief.ts";
 import {ConversationAgent} from "./conversation-agent.ts";
@@ -188,7 +189,7 @@ type BotInboxItem = InboxItem<typeof app.messages>;
 async function handleEnvelope(space:BotInboxItem[0],envelope:BotInboxItem[1]) {
   for (const message of inboundMessages(envelope)) {
   if (message.direction === "outbound") continue;
-  const claimed=await messageDelivery.claim(space.id,message.id);
+  const claimed=true; // The shared ingress already reserved this message ID.
   console.log("[delivery] inbound",JSON.stringify({run:runTag,chat:messageTag(space.id),message:messageTag(message.id),claimed,type:message.content.type}));
   if(!claimed)continue;
   if(message.sender?.id)conversationSenders.set(space.id,message.sender.id);
@@ -432,12 +433,13 @@ async function handleEnvelope(space:BotInboxItem[0],envelope:BotInboxItem[1]) {
 }
 }
 
+const dispatchInbound=createInboundDispatch<BotInboxItem>({claim:(chat,id)=>messageDelivery.claim(chat,id),cancel:chat=>conversationAgent.cancel(chat),enqueue:(chat,work)=>conversationQueue.enqueue(chat,work),handle:async(_chat,[space,message])=>handleEnvelope(space,message),id:([_space,message])=>message.id,isText:([_space,message])=>message.content.type==="text",onError:()=>console.error("Conversation processing failed; no content or credentials logged.")});
+async function acceptEnvelope(space:BotInboxItem[0],envelope:BotInboxItem[1]){for(const message of inboundMessages(envelope))await dispatchInbound(space.id,[space,message] as BotInboxItem);}
 console.log("[delivery] awaiting_inbound",JSON.stringify({run:runTag}));
-const inboxRecovery=new InboxRecovery({recipient:()=>reminders.notificationRecipient(),list:photonInboxList(),deliver:async(chat,id)=>{const space=await messaging.space.get(chat);const envelope=await space.getMessage(id);if(!envelope)throw Error("Message hydration unavailable");if(inboundMessages(envelope).some(m=>m.content.type==="text"))conversationAgent.cancel(space.id);void conversationQueue.enqueue(space.id,()=>handleEnvelope(space,envelope as BotInboxItem[1])).catch(()=>console.error("Recovered message processing failed; no content logged."));}});
+const inboxRecovery=new InboxRecovery({recipient:()=>reminders.notificationRecipient(),list:photonInboxList(),deliver:async(chat,id)=>{const space=await messaging.space.get(chat);const envelope=await space.getMessage(id);if(!envelope)throw Error("Message hydration unavailable");await acceptEnvelope(space,envelope as BotInboxItem[1]);}});
 let lastRecoveryError=0;
 async function recoverInbox(){try{await inboxRecovery.tick();}catch{if(Date.now()-lastRecoveryError>300000){lastRecoveryError=Date.now();console.error("Backup inbox check unavailable; live inbox remains enabled.");}}}
 void recoverInbox();setInterval(()=>void recoverInbox(),8000).unref();
 for await(const [space,envelope] of messaging.messages){
-  if(inboundMessages(envelope).some(m=>m.content.type==="text"))conversationAgent.cancel(space.id);
-  void conversationQueue.enqueue(space.id,()=>handleEnvelope(space,envelope)).catch(()=>console.error("Conversation processing failed; no content or credentials logged."));
+  await acceptEnvelope(space,envelope);
 }
