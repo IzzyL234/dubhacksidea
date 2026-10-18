@@ -134,7 +134,7 @@ export class StudyReminders {
       let calendarAvailable=true,blocks:StudyBlock[]=[];
       try{blocks=(await this.deps.events(now)).sort((a,b)=>a.start-b.start);}catch(error){if(!this.deps.coordinate)throw error;calendarAvailable=false;}
       const current=new Map(blocks.map(b=>[b.key,b]));
-      if(state.pending&&(state.pending.expires<now||(state.pending.kind!=="place"&&!current.has(state.pending.key))))delete state.pending;
+      if(state.pending&&(state.pending.expires<now||(state.pending.kind!=="place"&&!current.has(state.pending.key)))){if(state.pending.kind!=="place"&&!current.has(state.pending.key))await this.audit(state.conversation,"calendar_opening_changed");delete state.pending;}
       for(const [key,delivery]of Object.entries(state.events)){
         if(delivery.block.end<now-14*86400_000){delete state.events[key];continue;}
         const fresh=current.get(key);if(fresh&&!delivery.sessionId)delivery.block=fresh;
@@ -146,6 +146,7 @@ export class StudyReminders {
         if(!await this.deps.active(state.conversation,delivery.sessionId)||await this.deps.checkIn(state.conversation))continue;
         delivery.endAttempted=true;state.lastPrompt=now;
         await this.save(state); // Reserve before send: delivery uncertainty must not cause repeat texts after restart.
+        await this.audit(state.conversation,"study_block_ended");
         await this.deps.send(state.conversation,"Your calendar study block has ended. When you're finished, text done for your quick check-in. If you're still studying, keep going—I'll stay quiet.");
         return;
       }
@@ -187,3 +188,5 @@ export class StudyReminders {
     });
   }
 }
+
+

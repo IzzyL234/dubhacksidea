@@ -1,3 +1,6 @@
+import {configuredDashboardCalendar} from "./dashboard-calendar.ts";
+import {StudyDeparture} from "./study-departure.ts";
+import {isStudyTimeRequest,studyTimeReply} from "./study-time.ts";
 import {photoAttachment} from "./photo-input.ts";
 import {acquireInstance,AlreadyRunning} from "./single-instance.ts";
 import {fileURLToPath as instanceFilePath} from "node:url";
@@ -20,13 +23,6 @@ import { FeedbackFlow } from "./feedback.ts";
 import { getUpcomingCalendarReply, isUpcomingRequest, getOpenStudyWindows, getOpenTimeReply } from "./calendar.ts";
 import { demoCalendar } from "./calendar-api.ts";
 import { CalendarCommands } from "./calendar-commands.ts";
-import {
-  StagedProposalEngine,
-  isAgenticProposalIntent,
-  isPendingProposalsQuery,
-  isProposalApproval,
-  isProposalRejection,
-} from "./staged-proposals.ts";
 import { StudyReminders } from "./proactive.ts";
 import { Spectrum } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
@@ -50,7 +46,7 @@ const runTag=traceUUID().slice(0,8);
 const messageTag=(value:string)=>traceHash("sha256").update(value).digest("hex").slice(0,12);
 console.log("[delivery] process",JSON.stringify({run:runTag,pid:process.pid}));
 const conversations = new Map<string, Turn[]>();
-const studySessions = new StudySessions();
+const studySessions = new StudySessions().enableDemoPrior();
 const sessionContext=new SessionContext();
 const feedbackFlow = new FeedbackFlow(undefined, undefined, {
   begin: key => studySessions.beginFeedback(key),
@@ -83,10 +79,10 @@ const locationTrial = new LocationTrial();
 const locationDiagnostics = new LocationDiagnostics();
 const messaging = imessage(app);
 const calendarCommands = new CalendarCommands(demoCalendar,undefined,Date.now,interpretCalendar);
-const stagedProposals = new StagedProposalEngine(demoCalendar);
 const smartPrompts = new SmartPrompts({eventDriven:true,sessionState:async c=>({...await studySessions.chatContext(c),feedbackPending:await feedbackFlow.hasDraft(c)}),coordinatorPlaces:true,learn:async(c,p,m)=>({...await studySessions.proactiveOptions(c,p,m),sessionContext:await sessionContext.summary(c)}),events:configuredEventSink(),read:readPhotonLocation,decide:decidePrompt,lookup:lookupCampusBuildings,localBuildings:true});
+const departures=new StudyDeparture({session:c=>studySessions.departureSession(c),read:c=>smartPrompts.departureLocation(c),send:async(c,text)=>{const space=await messaging.space.get(c);await space.send(text);}});
 const reminders = new StudyReminders({
-  refresh:c=>smartPrompts.refreshPresence(c),
+  refresh:async c=>{await departures.tick(c);await smartPrompts.refreshPresence(c);},
   promptBudget:6,
   resolvePlace:(c,accept)=>smartPrompts.resolvePlace(c,accept),
   coordinate:(c,b,available)=>smartPrompts.evaluate(c,b,available),
@@ -118,25 +114,29 @@ async function retryFeedbackSync() {
     try { await studySessions.syncPending(); }
     catch { console.error("Session cloud sync deferred. Local sessions are kept; check the session migration."); }
     try {await smartPrompts.syncPending();}catch{console.error("Proactivity events queued; check Supabase migration 006 and connection.");}
+    try{const rebuilt=await studySessions.rebuildDaily();if(rebuilt.rebuilt)console.log(`Rebuilt ${rebuilt.rebuilt} personal model(s) from saved history.`);}catch{console.error("Model consistency rebuild will retry; saved feedback is preserved.");}
     const result = await feedbackFlow.syncPending();
     if (result.synced) console.log(`Uploaded ${result.synced} pending feedback check-in(s).`);
   } catch {
     console.error("Feedback sync will retry. Local copies are kept.");
   } finally { feedbackSyncRunning = false; }
 }
+const dashboardCalendar=configuredDashboardCalendar(demoCalendar);
+async function syncDashboardCalendar(){try{await dashboardCalendar?.sync();}catch{console.error("Dashboard calendar sync deferred; check migration 011 and Calendar connection.");}}
+void syncDashboardCalendar();
+setInterval(()=>void syncDashboardCalendar(),60000).unref();
 void retryFeedbackSync();
 setInterval(() => void retryFeedbackSync(), 60_000).unref();
 
 const instructions = `
-You are an Agentic Calendar Planner and personal study assistant backed by a Staged Approval Queue ("Git Diff for Calendar").
+You are a friendly personal study and scheduling assistant.
 Write short, natural replies suitable for text messages.
-When the user asks to build their schedule, add recurring classes, move blocks, change deadlines, or split study sessions, you design the schedule changes using LinUCB context and their 24h LearnedUserRhythm, stage them in pending_proposals (CREATE_EVENT, UPDATE_EVENT, SPLIT_OR_RESCHEDULE_BLOCK, DELETE_EVENT, UPDATE_DEADLINE), and present a clean preview asking for approval ("Reply YES to lock this in, or NO to adjust").
-Never claim a calendar mutation is already committed to Google Calendar until the user approves the staged proposal or executes an explicit command.
+Help the user think through study plans and commitments.
 Ask one clarifying question at a time when needed. To record a study check-in, tell the user to text "rate session". A separate handler collects productivity, mood, and distraction ratings. Never invent ratings or claim you recorded them yourself.
 To track a linked study session, tell the user to text "start studying", then send a workspace photo when prompted. After successful photo analysis, a separate text asks starting energy 1-5. Photo analysis extracts visible features; missing place/seat/planned minutes may be requested afterward, such as "library desk 45". They can use "study score" for an estimate, "recommend space" for hypothetical setup comparisons, and text "done" for linked ratings. They can optionally text "starting context 3 quiet" in the first five minutes to record energy and noise. These fields are collection-only, not score inputs yet. High-distraction feedback can be described naturally and requires confirmation of Gemini's suggested category. These commands are handled separately; never claim you ran them yourself or invent workspace measurements.
-Calendar reminders are controlled by "reminders on", "reminders off", "reminders status", "quiet hours off", and optional "quiet hours 22 8". They detect open time between commitments, not event titles. Study suggestions can happen at any hour, with at least 30 free minutes and 10-minute buffers. Quiet hours are off unless explicitly configured. Only Hackathon Demo is checked. Never claim to enable reminders yourself. Accepting a study invitation starts a tracked session and attempts to add it to Hackathon Demo. The reply confirms booking or explains failure; retry calendar safely retries a failed booking. Manual start studying begins tracking; done or finished studying logs the actual completed interval to Hackathon Demo, with no duplicate if a proactive booking already exists. They work while the bot runs and use Pacific quiet hours. Text "open time" to list gaps.
-The bot reads upcoming events with "calendar"; "calendar events" shows numbered events for editing. Explicit pipe commands are also supported: "add event Title | YYYY-MM-DD 14:00 | YYYY-MM-DD 14:45", "move event 2 | YYYY-MM-DD 15:00 | YYYY-MM-DD 15:45", or "rename event 2 | New title". Times are Pacific; use "calendar help" for syntax.
-Shared Find My location is available only through separate explicit handlers. For a shared-location trial, tell the user to text location. Never infer their current location from conversation or claim GPS access. For an actual shared Find My snapshot check, tell the user to text live location status; a separate handler calls Photon. Text "smart prompts on" to enable smart suggestions and UW Seattle building discovery.
+Natural language calendar requests are handled before general chat. Never claim a calendar write succeeded unless the calendar handler reported success. If an arrival check-in asks what the user is doing, respond conversationally to their answer; do not start a session or book an event unless asked. Calendar reminders are controlled by "reminders on", "reminders off", "reminders status", "quiet hours off", and optional "quiet hours 22 8". They detect open time between commitments, not event titles. Study suggestions can happen at any hour, with at least 30 free minutes and 10-minute buffers. Quiet hours are off unless explicitly configured. Only Hackathon Demo is checked. Never claim to enable reminders yourself. Accepting a study invitation starts a tracked session and attempts to add it to Hackathon Demo. The reply confirms booking or explains failure; retry calendar safely retries a failed booking. Manual start studying begins tracking; done or finished studying logs the actual completed interval to Hackathon Demo, with no duplicate if a proactive booking already exists. They work while the bot runs and use Pacific quiet hours. Text "open time" to list gaps.
+The bot reads upcoming events with "calendar"; "calendar events" shows numbered events for editing. Calendar tools support explicit commands: "add event Title | YYYY-MM-DD 14:00 | YYYY-MM-DD 14:45", "move event 2 | YYYY-MM-DD 15:00 | YYYY-MM-DD 15:45", or "rename event 2 | New title". Times are Pacific; use "calendar help" for syntax. Never claim an event was created or edited yourself: deterministic handlers execute these commands and confirm actual results.
+Never invent calendar events, claim you performed a calendar lookup yourself, or claim you booked or saved anything. Shared Find My location is available only through separate explicit handlers. For a shared-location trial, tell the user to text location. Never infer their current location from conversation or claim GPS access. For an actual shared Find My snapshot check, tell the user to text live location status; a separate handler calls Photon. Text "smart prompts on" to enable smart suggestions and UW Seattle building discovery. The coordinator can reason about stable unconfirmed or unnamed places. Saving a place is optional, never required before a study invitation. Study invitations still need open time. Home status is unknown unless the user has labeled home/dorm. Text "where am i" for a fresh building estimate. After stable readings at an unknown place, the coordinator may offer studying directly or optionally ask to save a detected spot; yes saves only the place and never starts a session. A separate later study invitation requires a separate yes. "place discovery off" disables map lookup; "remember place library" remains a manual fallback. Fresh distinct location readings over three minutes, calendar availability, quiet hours, and prompt limits must pass before a separate coordinator decision. The coordinator receives real linked-history productivity/mood estimates, uncertainty, and matching sample counts. Historical workspace profiles are not current observations. The coordinator uses the configured text model; code executes the confirmed tools. "why quiet" shows reasons. Never infer that these checks passed or that a session started. "smart prompts off" stops suggestions.
 `;
 
 for await (const [space, envelope] of app.messages) {
@@ -198,40 +198,12 @@ for await (const [space, envelope] of app.messages) {
   }
   if (message.content.type !== "text") continue;
 
-  const incoming = message.content.text.trim();
+  let incoming = message.content.text.trim();
   if (!incoming) continue;
 
   try {
-    // Staged Approval Queue ("Git Diff for Calendar"): check pending approvals/rejections first
-    if (isPendingProposalsQuery(incoming)) {
-      const pending = await stagedProposals.getPendingProposals();
-      if (!pending.length) {
-        await space.send("No pending staged calendar proposals right now.");
-      } else {
-        await space.send(pending.map(p => stagedProposals.formatProposalPreview(p)).join("\n\n---\n\n"));
-      }
-      continue;
-    }
-    if (isProposalApproval(incoming)) {
-      const pending = await stagedProposals.getPendingProposals();
-      if (pending.length > 0) {
-        const batchMatch = incoming.match(/\b(batch_[a-z0-9]+)\b/i);
-        const { replyText } = await stagedProposals.approvePending(batchMatch?.[1]);
-        await space.send(replyText);
-        void pollStudyReminders();
-        continue;
-      }
-    }
-    if (isProposalRejection(incoming)) {
-      const pending = await stagedProposals.getPendingProposals();
-      if (pending.length > 0) {
-        const batchMatch = incoming.match(/\b(batch_[a-z0-9]+)\b/i);
-        const { replyText } = await stagedProposals.rejectPending(batchMatch?.[1], incoming);
-        await space.send(replyText);
-        continue;
-      }
-    }
-
+    const departureAnswer=await departures.answer(space.id,incoming);
+    if(departureAnswer){if(departureAnswer.done)incoming="done";else{await space.send(departureAnswer.reply!);continue;}}
     if(incoming.toLowerCase()==="smart prompts on"){
       const connected=await reminders.handle(space.id,"reminders on",message.id+":connect");
       if(!await reminders.enabledFor(space.id)){await space.send(connected??"Could not connect reminders.");continue;}
@@ -247,6 +219,11 @@ for await (const [space, envelope] of app.messages) {
     }
     if(incoming.toLowerCase()==="retry calendar"){
       await space.send(await studySessions.retryCalendar(space.id,demoCalendar));continue;
+    }
+    if(isStudyTimeRequest(incoming)){
+      try{await space.send(await studyTimeReply(incoming,await getOpenStudyWindows(),(start,lengths)=>studySessions.timeEstimates(space.id,start,lengths)));}
+      catch{await space.send("I couldn’t read your calendar openings just now. Please try again shortly; I haven’t booked anything.");}
+      continue;
     }
     if(isStudyRecommendation(incoming)){const recommendation=await studySessions.handle(space.id,incoming,message.id);if(recommendation){await space.send(recommendation);continue;}}
     const extraReply=await sessionContext.handle(space.id,incoming,message.id);
@@ -277,23 +254,6 @@ for await (const [space, envelope] of app.messages) {
       void pollStudyReminders();
       await space.send((finishedCalendar?finishedCalendar+"\n\n":"")+feedbackReply+(extraQuestion?"\n\n"+extraQuestion:""));
       continue;
-    }
-    // Explicit pipe commands (`add event ... | ...`, `move event 2 | ...`, `calendar events`, `calendar help`)
-    if (/^(calendar events|calendar help|add event(?:\s|$)|move event(?:\s|$)|rename event(?:\s|$))/i.test(incoming)) {
-      const calendarReply = await calendarCommands.handle(space.id, incoming, message.id);
-      if (calendarReply !== null) {
-        await space.send(calendarReply);
-        void pollStudyReminders();
-        continue;
-      }
-    }
-    // Agentic Calendar Planner: natural-language schedule building, moving blocks, splitting sessions, or changing deadlines
-    if (isAgenticProposalIntent(incoming)) {
-      const { replyText, proposal } = await stagedProposals.proposeFromText(incoming, "user_chat");
-      if (proposal) {
-        await space.send(replyText);
-        continue;
-      }
     }
     const calendarReply = await calendarCommands.handle(space.id, incoming, message.id);
     if (calendarReply !== null) {
@@ -338,8 +298,7 @@ for await (const [space, envelope] of app.messages) {
       const turns:Turn[]=[...history,{role:"user",parts:[{text:incoming}]}];
       const studyState=await studySessions.chatContext(space.id);
       const feedbackPending=await feedbackFlow.hasDraft(space.id);
-      const pendingProposals=await stagedProposals.getPendingProposals();
-      const reply=await generateText(instructions+"\nActual current study state (authoritative): "+JSON.stringify({...studyState,feedbackPending,confirmedContext:await sessionContext.summary(space.id),pendingProposalsCount:pendingProposals.length,pendingBatches:pendingProposals.map(p=>({batch_id:p.batch_id,summary:p.summary_message,operations_count:p.operations.length}))})+". If feedbackRecorded is true, acknowledge completed ratings and never ask to rate that session again. Do not suggest rate session unless the user explicitly asks how to give feedback. A done message begins the rating flow; ratings are only complete when saved. Only confirmedContext contains saved optional notes. These locally stored sentiment/social tags inform coordinator decisions but are not LinUCB features or causal evidence. Never claim ordinary conversation was saved or learned. Never infer friends were distracting without explicit confirmed evidence.",turns);
+      const reply=await generateText(instructions+"\nActual current study state (authoritative): "+JSON.stringify({...studyState,feedbackPending,confirmedContext:await sessionContext.summary(space.id)})+". If feedbackRecorded is true, acknowledge completed ratings and never ask to rate that session again. Do not suggest rate session unless the user explicitly asks how to give feedback. A done message begins the rating flow; ratings are only complete when saved. Only confirmedContext contains saved optional notes. These locally stored sentiment/social tags inform coordinator decisions but are not LinUCB features or causal evidence. Never claim ordinary conversation was saved or learned. Never infer friends were distracting without explicit confirmed evidence.",turns);
       await space.send(reply);
       conversations.set(space.id,[...turns,{role:"model" as const,parts:[{text:reply}]}].slice(-20));
     });
