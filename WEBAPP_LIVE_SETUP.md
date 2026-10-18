@@ -61,7 +61,12 @@ Phone calendar reviews also need the existing bot/review state on an always-runn
 
 `.vercelignore` allowlists website assets, the small hosted API and its shared pure helpers, package metadata, and synthetic starter data. It excludes private runtime state, `.env`, Google credentials/tokens, photos, and personal study records. Keep those exclusions when deploying from a populated checkout.
 
-UI references reviewed: [Motion](https://github.com/motiondivision/motion) and [Floating UI](https://github.com/floating-ui/floating-ui), both MIT-licensed. The companion uses the project's existing penguin SVG, native CSS animation and standard browser APIs; no third-party UI code or new animation dependencies were copied. Native behavior keeps this small vanilla-JavaScript site lightweight. Reduced-motion preferences are respected.
+The website now uses [Motion](https://github.com/motiondivision/motion), pinned to 14.3.0, for scroll reveals, benefit-card hover movement and a small mascot greeting. The implementation is in `src/ui-effects.js`. Run `bun run build:effects` after editing it and commit the self-hosted `frontend/effects.js` bundle. OS reduced-motion settings and Daily's Keep things still preference stop these effects. License notices are in `frontend/THIRD_PARTY_NOTICES.txt`.
 
 The hosted API is bundled with `bun run build:hosted` from `src/hosted-entry.ts` into `api/index.mjs`. Commit the regenerated bundle when changing hosted API source. This avoids TypeScript import-path differences in the Node deployment runtime. The Vercel build runs this command as well; the bundle itself has no runtime package dependencies.
 
+## Confirmed context and tunnel setup
+
+See `MODEL_CONTEXT.md` for the exact split between numerical model training and confirmed note context. Migration 014 adds private Supabase storage for confirmed tags and retryable uploads; it must be applied before activating that cloud path. The new coordinator summary describes repeated factors with at least three sessions in a 90-day window. These are associations, not causal estimates or additional LinUCB features.
+
+See `CLOUDFLARE_SETUP.md` for the protected tunnel launcher and current connectivity blocker. Both transports timed out on port 7844 on this network. No working Cloudflare connection or public calendar approval has been verified.

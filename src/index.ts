@@ -136,6 +136,8 @@ async function retryFeedbackSync() {
     try{const rebuilt=await studySessions.rebuildDaily();if(rebuilt.rebuilt)console.log(`Rebuilt ${rebuilt.rebuilt} personal model(s) from saved history.`);}catch{console.error("Model consistency rebuild will retry; saved feedback is preserved.");}
     const result = await feedbackFlow.syncPending();
     if (result.synced) console.log(`Uploaded ${result.synced} pending feedback check-in(s).`);
+    try{const contextSync=await sessionContext.flush();if(contextSync.pending)console.error('Confirmed session context queued; check migration 014 and Supabase connection.');}
+    catch{console.error('Confirmed session context sync will retry. Local copies are kept.');}
   } catch {
     console.error("Feedback sync will retry. Local copies are kept.");
   } finally { feedbackSyncRunning = false; }
