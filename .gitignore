@@ -14,3 +14,7 @@ data/feedback/
 data/sessions/
 
 data/reminders/
+
+.google-calendar-write-token.json
+
+data/calendar-commands/

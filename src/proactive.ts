@@ -52,7 +52,7 @@ export class StudyReminders {
         else{
           if(!owner){state.events={};delete state.pending;delete state.lastPrompt;}
           state.conversation=conversation;state.enabled=true;
-          reply=`Study reminders are on for this chat. Quiet hours: ${state.quietStart}:00–${state.quietEnd}:00 Pacific. Keep the bot running. I watch timed calendar events with study or studying in the title. Text reminders off to stop.`;
+          reply=`Open-time suggestions are on for this chat. I look for 30+ free minutes between Hackathon Demo commitments, within 9 AM–8 PM Pacific with 10-minute buffers. Quiet hours: ${state.quietStart}:00–${state.quietEnd}:00 Pacific. Keep the bot running. Text reminders off to stop.`;
         }
       }else if(command==="reminders off"){
         if(owner){state.enabled=false;delete state.pending;reply="Study reminders are off.";}
@@ -74,14 +74,15 @@ export class StudyReminders {
         else{
           // Re-read Calendar before confirmation so a canceled or rescheduled event cannot start a stale session.
           const fresh=(await this.deps.events(this.now())).find(b=>b.key===pending.key);
-          if(!fresh||this.now()<fresh.start||this.now()>=fresh.end){delete state.pending;reply="That calendar block changed or ended. Text start studying if you'd like to begin now.";}
+          if(!fresh||this.now()<fresh.start||this.now()>=fresh.end||(fresh.kind==="open"&&fresh.end-this.now()<30*60_000)){delete state.pending;reply="That calendar opening changed or ended. Text open time for new options, or start studying to begin manually.";}
           else if(await this.deps.busy(conversation))reply="You already have an unfinished session or check-in. Finish it first, or text discard session.";
           else{
-            const started=await this.deps.start(conversation,fresh);
+            const planned=fresh.kind==="open"?{...fresh,start:this.now(),end:this.now()+Math.min(45,Math.floor((fresh.end-this.now())/60_000))*60_000}:fresh;
+            const started=await this.deps.start(conversation,planned);
             if(!started)reply="You already have an unfinished study session. Text study status.";
             else{
               state.events[pending.key]??={block:fresh,startAttempted:true};
-              state.events[pending.key]!.sessionId=started.id;state.events[pending.key]!.block=fresh;
+              state.events[pending.key]!.sessionId=started.id;state.events[pending.key]!.block=planned;
               delete state.pending;reply=started.reply;
             }
           }
@@ -101,11 +102,11 @@ export class StudyReminders {
       if(state.pending&&(state.pending.expires<now||!current.has(state.pending.key)))delete state.pending;
       for(const [key,delivery]of Object.entries(state.events)){
         if(delivery.block.end<now-14*86400_000){delete state.events[key];continue;}
-        const fresh=current.get(key);if(fresh)delivery.block=fresh;
+        const fresh=current.get(key);if(fresh&&!delivery.sessionId)delivery.block=fresh;
       }
       // End prompt applies only to the exact session created by this calendar confirmation.
       for(const delivery of Object.values(state.events)){
-        if(!delivery.sessionId||delivery.endAttempted||!current.has(delivery.block.key)
+        if(!delivery.sessionId||delivery.endAttempted||(!current.has(delivery.block.key)&&delivery.block.kind!=="open")
           ||now<delivery.block.end||now-delivery.block.end>15*60_000)continue;
         if(!await this.deps.active(state.conversation,delivery.sessionId)||await this.deps.checkIn(state.conversation))continue;
         delivery.endAttempted=true;state.lastPrompt=now;
@@ -115,12 +116,17 @@ export class StudyReminders {
       }
       if(state.pending||await this.deps.busy(state.conversation)){await this.save(state);return;}
       if(state.lastPrompt!==undefined&&now-state.lastPrompt<10*60_000){await this.save(state);return;}
-      const block=blocks.find(b=>now>=b.start&&now-b.start<=5*60_000&&now<b.end&&!state.events[b.key]?.startAttempted);
+      const today=new Date(now).toLocaleDateString("en-CA",{timeZone:"America/Los_Angeles"});
+      const attemptsToday=Object.values(state.events).filter(d=>d.startAttempted&&new Date(d.block.start).toLocaleDateString("en-CA",{timeZone:"America/Los_Angeles"})===today).length;
+      if(attemptsToday>=2){await this.save(state);return;}
+      const block=blocks.find(b=>now>=b.start&&(b.kind==="open"?b.end-now>=30*60_000:now-b.start<=5*60_000)&&now<b.end&&!state.events[b.key]?.startAttempted);
       if(!block){await this.save(state);return;}
       state.events[block.key]={block,startAttempted:true};
       state.pending={key:block.key,expires:Math.min(block.end,now+10*60_000)};state.lastPrompt=now;
       await this.save(state);
-      await this.deps.send(state.conversation,`Ready for your calendar block “${block.title}”? Reply yes to start a study session, or skip. I'll only follow up if you start.`);
+      await this.deps.send(state.conversation,block.kind==="open"
+        ?`Your demo calendar has ${Math.floor((block.end-now)/60_000)} free minutes now. Want a ${Math.min(45,Math.floor((block.end-now)/60_000))}-minute study session? Reply yes or skip. I'll only follow up if you start.`
+        :`Ready for your calendar block “${block.title}”? Reply yes to start a study session, or skip. I'll only follow up if you start.`);
     });
   }
 }

@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { StudyReminders, isQuiet, type ReminderDependencies } from "../src/proactive.ts";
-import { studyBlock, type StudyBlock } from "../src/study-events.ts";
+import { type StudyBlock } from "../src/study-events.ts";
 import { StudySessions } from "../src/sessions.ts";
 
 const dirs:string[]=[];
@@ -24,15 +24,6 @@ async function setup(){
     time:(value:number)=>{now=value;},blocks:(value:StudyBlock[])=>{blocks=value;},busy:(value:boolean)=>{busy=value;},
     draft:(value:boolean)=>{draft=value;},active:(value:boolean)=>{active=value;},failSend:(value:boolean)=>{failSend=value;},failCalendar:(value:boolean)=>{failCalendar=value;}};
 }
-test("only timed, uncanceled study titles with usable durations are eligible; recurring instances stay distinct",()=>{
-  const e={id:"instance-one",summary:"Study math",start:{dateTime:"2026-10-17T12:00:00-07:00"},end:{dateTime:"2026-10-17T12:45:00-07:00"}};
-  expect(studyBlock("calendar",e)?.start).toBe(noon);
-  expect(studyBlock("calendar",{...e,id:"instance-two"})?.key).not.toBe(studyBlock("calendar",e)?.key);
-  expect(studyBlock("calendar",{...e,summary:"Math class"})).toBeNull();
-  expect(studyBlock("calendar",{...e,status:"cancelled"})).toBeNull();
-  expect(studyBlock("calendar",{...e,start:{}})).toBeNull();
-  expect(studyBlock("calendar",{...e,end:{dateTime:"2026-10-17T12:01:00-07:00"}})).toBeNull();
-});
 test("disabled reminders never read Calendar; one chat binding survives restart and off stops polling",async()=>{
   const s=await setup();await s.reminders.tick();expect(s.reads).toBe(0);
   await s.reminders.handle("a","reminders on","on");

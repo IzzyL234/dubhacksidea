@@ -2,7 +2,9 @@ import { LocationTrial } from "./location.ts";
 import { StudySessions } from "./sessions.ts";
 import { inboundMessages } from "./inbound.ts";
 import { FeedbackFlow } from "./feedback.ts";
-import { getUpcomingCalendarReply, isUpcomingRequest, getCalendarStudyBlocks } from "./calendar.ts";
+import { getUpcomingCalendarReply, isUpcomingRequest, getOpenStudyWindows, getOpenTimeReply } from "./calendar.ts";
+import { demoCalendar } from "./calendar-api.ts";
+import { CalendarCommands } from "./calendar-commands.ts";
 import { StudyReminders } from "./proactive.ts";
 import { Spectrum } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
@@ -29,8 +31,9 @@ const feedbackFlow = new FeedbackFlow(undefined, undefined, {
 });
 const locationTrial = new LocationTrial();
 const messaging = imessage(app);
+const calendarCommands = new CalendarCommands(demoCalendar);
 const reminders = new StudyReminders({
-  events: now => getCalendarStudyBlocks(now),
+  events: now => getOpenStudyWindows(now),
   send: async (conversation, text) => { const space = await messaging.space.get(conversation); await space.send(text); },
   busy: async conversation => await studySessions.hasUnfinished(conversation) || await feedbackFlow.hasDraft(conversation),
   start: (conversation, block) => studySessions.startCalendar(conversation, block.key, (block.end-block.start)/60_000),
@@ -69,8 +72,8 @@ Write short, natural replies suitable for text messages.
 Help the user think through study plans and commitments.
 Ask one clarifying question at a time when needed. To record a study check-in, tell the user to text "rate session". A separate handler collects productivity, mood, and distraction ratings. Never invent ratings or claim you recorded them yourself.
 To track a linked study session, tell the user to text "start studying", then send place/seat/planned minutes such as "library desk 45". They can send a workspace photo, use "study score" for an estimate, and text "done" for linked ratings. These commands are handled separately; never claim you ran them yourself or invent workspace measurements.
-Calendar reminders are controlled by "reminders on", "reminders off", "reminders status", and "quiet hours 22 8". Only timed study/studying blocks are eligible. Never claim to enable reminders yourself. They work while the bot runs and use Pacific quiet hours.
-The bot can read the next five events from Hackathon Demo when the user texts "What's coming up?" or "calendar". For other calendar questions, ask them to use that command. You cannot create or change events yet.
+Calendar reminders are controlled by "reminders on", "reminders off", "reminders status", and "quiet hours 22 8". They detect open time between commitments, not event titles. The default study window is 9 AM–8 PM Pacific with at least 30 free minutes and 10-minute buffers. Only Hackathon Demo is checked. Never claim to enable reminders yourself. They work while the bot runs and use Pacific quiet hours. Text "open time" to list gaps.
+The bot reads upcoming events with "calendar"; "calendar events" shows numbered events for editing. Calendar tools support explicit commands: "add event Title | YYYY-MM-DD 14:00 | YYYY-MM-DD 14:45", "move event 2 | YYYY-MM-DD 15:00 | YYYY-MM-DD 15:45", or "rename event 2 | New title". Times are Pacific; use "calendar help" for syntax. Never claim an event was created or edited yourself: deterministic handlers execute these commands and confirm actual results.
 Never invent calendar events, claim you performed a calendar lookup yourself, or claim you booked or saved anything. You cannot access live phone location. For a shared-location trial, tell the user to text location. Never infer their current location from conversation or claim GPS access.
 `;
 
@@ -121,6 +124,16 @@ for await (const [space, envelope] of app.messages) {
   if (!incoming) continue;
 
   try {
+    if (/^(?:open time|free time|find open time|when am i free)[?.!]*$/i.test(incoming)) {
+      await space.send(await getOpenTimeReply());
+      continue;
+    }
+    const calendarReply = await calendarCommands.handle(space.id, incoming, message.id);
+    if (calendarReply !== null) {
+      await space.send(calendarReply);
+      void pollStudyReminders();
+      continue;
+    }
     const reminderReply = await reminders.handle(space.id, incoming, message.id);
     if (reminderReply !== null) {
       await space.send(reminderReply);
