@@ -1,3 +1,4 @@
+import {matchesCampusPlace} from "./uw-buildings.ts";
 import {chooseNearby,type NearbyPlace} from "./nearby-places.ts";
 import { createHash,randomUUID } from "node:crypto";
 import { mkdir,readFile,writeFile,rename } from "node:fs/promises";
@@ -8,7 +9,7 @@ import type { LocationSnapshot } from "./photon-location.ts";
 import type { StudyBlock } from "./study-events.ts";
 import { validateDecision,type DecisionFacts,type PromptDecision } from "./proactive-decision.ts";
 
-const labels=["library","cafe","home","dorm_room","classroom"] as const;
+const labels=["library","cafe","home","dorm_room","classroom","campus_building"] as const;
 type Label=typeof labels[number];
 type Place={id?:string;name?:string;label:Label;latitude:number;longitude:number;radius:number};
 type Audit={at:number;action:"stay_quiet"|"offer_study"|"offer_place"|"accepted"|"skipped";reason:string;count:number;place?:Label};
@@ -17,8 +18,9 @@ type State={discovery?:boolean;lookupAfter?:number;lookupDay?:string;lookupCount
 type Sample={at:number;latitude:number;longitude:number;place:string};
 type Presence={place:Place;stableMinutes:number;ageSeconds:number;accuracy:number};
 export type Gate={allow:boolean;reason:string;message?:string;kind?:"place"};
-export type SmartDependencies={lookup?:(point:{latitude:number;longitude:number})=>Promise<NearbyPlace[]>;read:(address:string)=>Promise<LocationSnapshot>;decide:(facts:DecisionFacts)=>Promise<PromptDecision>;now?:()=>number};
+export type SmartDependencies={localBuildings?:boolean;lookup?:(point:{latitude:number;longitude:number;accuracy?:number})=>Promise<NearbyPlace[]>;read:(address:string)=>Promise<LocationSnapshot>;decide:(facts:DecisionFacts)=>Promise<PromptDecision>;now?:()=>number};
 const keyFor=(s:string)=>createHash("sha256").update(s).digest("hex");
+const atPlace=(place:{id?:string;latitude:number;longitude:number;radius?:number},reading:{latitude:number;longitude:number;accuracy:number})=>place.id?.startsWith("uw:")?matchesCampusPlace(place.id,reading):distanceMeters(place,reading)+reading.accuracy<=(place.radius??200);
 const timestamp=(value:string|Date|undefined)=>value instanceof Date?value.getTime():value?Date.parse(value):NaN;
 export function distanceMeters(a:{latitude:number;longitude:number},b:{latitude:number;longitude:number}):number {
   const rad=Math.PI/180,dLat=(b.latitude-a.latitude)*rad,dLon=(b.longitude-a.longitude)*rad;
@@ -51,12 +53,18 @@ export class SmartPrompts {
     state.audit=[...state.audit,{at:this.now(),action,reason,count:1,...(place?{place}:{})}].slice(-100);
   }
   async handle(conversation:string,address:string|undefined,text:string):Promise<string|null>{
-    const command=text.trim().toLowerCase();
-    if(!/^(remember place(?: .*)?|forget places|smart prompts (?:on|off)|place discovery (?:on|off)|proactivity (?:status|log)|why quiet)$/.test(command))return null;
+    const command=text.trim().toLowerCase().replace(/[.!?]+$/,"");
+    if(!/^(remember place(?: .*)?|forget places|smart prompts (?:on|off)|place discovery (?:on|off)|proactivity (?:status|log)|why quiet|where am i|campus location|detect building)$/.test(command))return null;
     const key=keyFor(conversation);
     return this.locked(key,async()=>{
       const state=await this.read(key);let reply:string;
-      if(command.startsWith("remember place")){
+      if(["where am i","campus location","detect building"].includes(command)){
+        if(!address||!this.deps.lookup)return "Campus lookup isn't connected.";
+        let reading;try{reading=freshReading(await this.deps.read(address),this.now());}catch{return "I couldn't read your shared location. Text live location status.";}
+        if(!reading)return "Your shared location needs a fresh timestamp and accuracy of 100 meters or better.";
+        const places=await this.deps.lookup(reading),place=places.length===1?places[0]:null;
+        return place?`Your latest location is near UW's ${place.name}. This is a building estimate; nothing was saved and no session started. Building data: UW Engineering Services.`:"I couldn't identify a clear UW Seattle building from your latest location. GPS may be between buildings or too imprecise.";
+      }else if(command.startsWith("remember place")){
         const label=command.slice("remember place ".length) as Label;
         if(!labels.includes(label))return "Use remember place library (or cafe, home, dorm_room, classroom) while physically there.";
         if(!address)return "I couldn't identify your iMessage address.";
@@ -67,11 +75,11 @@ export class SmartPrompts {
         reply=`Saved your current location as ${label.replaceAll("_"," ")}, using a 200-meter region. Its coordinates stay in your private local place settings. Text smart prompts on to use it, or forget places to remove saved places.`;
       }else if(command==="forget places"){
         state.places=[];delete state.candidate;delete state.offer;this.samples.delete(key);reply="Saved place coordinates removed. Smart suggestions will stay quiet until you save a place again.";
-      }else if(command.startsWith("place discovery ")){state.discovery=command.endsWith("on");if(!state.discovery)delete state.candidate;reply=state.discovery?"Nearby place discovery is on. Approximate coordinates are sent to OpenStreetMap Overpass to look up libraries and cafes. I ask before saving a place.":"Nearby place discovery is off. Only your saved places will be used.";
+      }else if(command.startsWith("place discovery ")){state.discovery=command.endsWith("on");if(!state.discovery)delete state.candidate;reply=state.discovery?"UW building discovery is on. Building matching runs locally using UW Engineering Services data. I ask before saving a study spot.":"Nearby place discovery is off. Only your saved places will be used.";
       }else if(command==="smart prompts on"){
         if(!address)return "I couldn't identify your iMessage address.";
         state.enabled=true;state.discovery??=true;state.address=address;this.samples.delete(key);
-        reply=`Smart prompts are on. Saved places: ${state.places.map(p=>p.label).join(", ")||"none—I can suggest a nearby library or cafe for confirmation"}. Fresh, stable location and a calendar opening must pass checks before Grok considers a suggestion. Nearby discovery sends approximate coordinates to OpenStreetMap Overpass; text place discovery off to disable it. Text why quiet for reasons.`;
+        reply=`Smart prompts are on. Saved places: ${state.places.map(p=>p.label).join(", ")||"none—I can recognize UW Seattle buildings for confirmation"}. Fresh, stable location and a calendar opening must pass checks before Grok considers a suggestion. UW building recognition runs locally using campus footprints. It does not require a calendar opening. Text place discovery off to disable discovery. Text why quiet for reasons.`;
       }else if(command==="smart prompts off"){
         state.enabled=false;delete state.address;delete state.candidate;delete state.offer;this.samples.delete(key);reply="Smart prompts are off. Saved places remain; use forget places to remove them.";
       }else if(command==="proactivity status"){
@@ -92,7 +100,7 @@ export class SmartPrompts {
     if(!state.address)return "sender_not_connected";
     let reading;try{reading=freshReading(await this.deps.read(state.address),this.now());}catch{this.samples.delete(key);return "location_unavailable";}
     if(!reading){this.samples.delete(key);return "location_stale_or_inaccurate";}
-    const place=state.places.find(p=>distanceMeters(p,reading)+reading.accuracy<=p.radius);
+    const place=state.places.find(p=>atPlace(p,reading));
     if(!place)return this.discover(key,state,reading);
     let samples=(this.samples.get(key)??[]).filter(s=>s.place===(place.id??place.label)&&reading.at-s.at<=5*60000&&s.at<=reading.at);
     if(samples.some(s=>distanceMeters(s,reading)>75))samples=[];
@@ -109,13 +117,13 @@ export class SmartPrompts {
     if(!samples.some(s=>s.at===reading.at))samples.push({...reading,place:"unknown"});
     this.samples.set(key,samples.slice(-8));
     if(samples.length<3||reading.at-samples[0]!.at<3*60000)return "waiting_for_unknown_place_dwell";
-    if(this.now()<(state.lookupAfter??0))return "place_lookup_cooldown";
+    if(!this.deps.localBuildings&&this.now()<(state.lookupAfter??0))return "place_lookup_cooldown";
     const day=localDate(this.now());if(state.lookupDay!==day){state.lookupDay=day;state.lookupCount=0;}
-    if((state.lookupCount??0)>=4)return "daily_place_lookup_budget";
+    if(!this.deps.localBuildings&&(state.lookupCount??0)>=4)return "daily_place_lookup_budget";
     state.lookupCount=(state.lookupCount??0)+1;state.lookupAfter=this.now()+15*60000;await this.save(key,state);
     let places:NearbyPlace[];try{places=await this.deps.lookup(reading);}catch{return "nearby_lookup_unavailable";}
-    const place=chooseNearby(places,reading);
-    if(!place||state.dismissed?.includes(place.id)||state.places.some(s=>s.id===place.id)||distanceMeters(place,reading)+reading.accuracy>200)return "no_clear_nearby_study_place";
+    const place=places[0]?.id.startsWith("uw:")?(places.length===1?places[0]:null):chooseNearby(places,reading);
+    if(!place||state.dismissed?.includes(place.id)||state.places.some(s=>s.id===place.id)||!atPlace(place,reading))return "no_clear_nearby_study_place";
     state.candidate={place,expires:this.now()+10*60000};this.log(state,"offer_place","confirm_nearby_place",place.label);return "place_confirmation_ready";
   }
   async resolvePlace(conversation:string,accept:boolean):Promise<string>{
@@ -124,12 +132,22 @@ export class SmartPrompts {
       if(!candidate||candidate.expires<this.now()||!state.enabled){delete state.candidate;await this.save(key,state);return "That place suggestion expired. Nothing was saved.";}
       if(!accept){state.dismissed=[...(state.dismissed??[]),candidate.place.id].slice(-100);state.reviewAfter=this.now()+60*60000;delete state.candidate;await this.save(key,state);return "Skipped that place. I won't suggest it again. No session was started.";}
       let reading;try{reading=state.address?freshReading(await this.deps.read(state.address),this.now()):null;}catch{reading=null;}
-      if(!reading||distanceMeters(reading,candidate.place)+reading.accuracy>200){delete state.candidate;await this.save(key,state);return "Your location changed or isn't fresh enough. Nothing was saved.";}
+      if(!reading||!atPlace(candidate.place,reading)){delete state.candidate;await this.save(key,state);return "Your location changed or isn't fresh enough. Nothing was saved.";}
       state.places=[...state.places.filter(p=>p.id!==candidate.place.id),{...candidate.place,radius:200}].slice(-30);
       delete state.candidate;this.samples.delete(key);this.log(state,"accepted","place_confirmed",candidate.place.label);await this.save(key,state);
       return `Saved “${candidate.place.name}” as a study spot. Future visits will be recognized automatically. No study session was started.`;
     });
   }
+  async observe(conversation:string):Promise<Gate>{
+    const key=keyFor(conversation);return this.locked(key,async()=>{
+      const state=await this.read(key);if(!state.enabled)return {allow:false,reason:"smart_prompts_off"};
+      if(this.now()<(state.reviewAfter??0))return {allow:false,reason:"decision_cooldown"};
+      const presence=await this.presence(key,state);
+      if(presence==="place_confirmation_ready"&&state.candidate){await this.save(key,state);return this.placeQuestion(state.candidate.place);}
+      const reason=typeof presence==="string"?presence:"known_place_ready";this.log(state,"stay_quiet",reason);await this.save(key,state);return {allow:false,reason};
+    });
+  }
+  private placeQuestion(place:NearbyPlace):Gate{return {allow:true,kind:"place",reason:"confirm_nearby_place",message:`Looks like you're near “${place.name}”. Save this as a study spot? Reply yes or skip. ${place.id.startsWith("uw:")?"Building data: UW Engineering Services.":"Nearby names: OpenStreetMap."} I can't tell whether you're inside.`};}
   async evaluate(conversation:string,block:StudyBlock):Promise<Gate>{
     const key=keyFor(conversation);return this.locked(key,async()=>{
       const state=await this.read(key);if(!state.enabled)return {allow:true,reason:"calendar_only"};
@@ -138,7 +156,7 @@ export class SmartPrompts {
       if(state.candidate&&state.candidate.expires<this.now())delete state.candidate;
       if(this.now()<(state.reviewAfter??0))return quiet("decision_cooldown");
       const presence=await this.presence(key,state);if(typeof presence==="string"){
-        if(presence==="place_confirmation_ready"&&state.candidate){await this.save(key,state);return {allow:true,kind:"place",reason:"confirm_nearby_place",message:`Looks like you're near “${state.candidate.place.name}”. Save this as a study spot? Reply yes or skip. Nearby names are from OpenStreetMap; I can't tell whether you're inside.`};}
+        if(presence==="place_confirmation_ready"&&state.candidate){await this.save(key,state);return this.placeQuestion(state.candidate.place);}
         return quiet(presence);
       }
       const freeMinutes=Math.floor((block.end-this.now())/60000);if(freeMinutes<30)return quiet("not_enough_open_time");

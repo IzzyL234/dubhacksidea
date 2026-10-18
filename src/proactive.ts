@@ -17,6 +17,7 @@ export type ReminderDependencies = {
   start: (conversation:string,block:StudyBlock)=>Promise<{id:string;reply:string}|null>;
   active: (conversation:string,id:string)=>Promise<boolean>;
   checkIn: (conversation:string)=>Promise<boolean>;
+  observe?:(conversation:string)=>Promise<{allow:boolean;message?:string;kind?:"place"}>;
   evaluate?:(conversation:string,block:StudyBlock)=>Promise<{allow:boolean;message?:string;kind?:"place"}>;
   resolvePlace?:(conversation:string,accept:boolean)=>Promise<string>;
   confirm?:(conversation:string,block:StudyBlock)=>Promise<boolean>;
@@ -111,9 +112,24 @@ export class StudyReminders {
       const state=await this.read();if(!state.enabled||!state.conversation)return;
       const now=this.now();
       if(isQuiet(now,state.quietStart,state.quietEnd)){await this.audit(state.conversation,"quiet_hours");return;}
+      if(state.pending&&state.pending.expires<now)delete state.pending;
+      // Building recognition is independent of Calendar and never starts a study session.
+      if(this.deps.observe&&!state.pending&&!await this.deps.busy(state.conversation)&&now>=(state.snoozeUntil??0)
+        &&(state.lastPrompt===undefined||now-state.lastPrompt>=10*60_000)){
+        const day=new Date(now).toLocaleDateString("en-CA",{timeZone:"America/Los_Angeles"});
+        const count=Object.values(state.events).filter(d=>d.startAttempted&&new Date(d.block.start).toLocaleDateString("en-CA",{timeZone:"America/Los_Angeles"})===day).length;
+        if(count<2){
+          const gate=await this.deps.observe(state.conversation);
+          if(gate.allow&&gate.kind==="place"&&gate.message&&!isQuiet(this.now(),state.quietStart,state.quietEnd)&&!await this.deps.busy(state.conversation)){
+            const key=`place:${now}`,block:StudyBlock={key,title:"Place confirmation",start:now,end:now+10*60_000};
+            state.events[key]={block,startAttempted:true};state.pending={key,expires:block.end,kind:"place"};state.lastPrompt=now;
+            await this.save(state);await this.deps.send(state.conversation,gate.message);return;
+          }
+        }
+      }
       const blocks=(await this.deps.events(now)).sort((a,b)=>a.start-b.start);
       const current=new Map(blocks.map(b=>[b.key,b]));
-      if(state.pending&&(state.pending.expires<now||!current.has(state.pending.key)))delete state.pending;
+      if(state.pending&&(state.pending.expires<now||(state.pending.kind!=="place"&&!current.has(state.pending.key))))delete state.pending;
       for(const [key,delivery]of Object.entries(state.events)){
         if(delivery.block.end<now-14*86400_000){delete state.events[key];continue;}
         const fresh=current.get(key);if(fresh&&!delivery.sessionId)delivery.block=fresh;

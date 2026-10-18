@@ -1,5 +1,5 @@
 export type DecisionFacts = {
-  place: "library"|"cafe"|"home"|"dorm_room"|"classroom";
+  place: "library"|"cafe"|"home"|"dorm_room"|"classroom"|"campus_building";
   stableMinutes:number; locationAgeSeconds:number; accuracyMeters:number;
   freeMinutes:number; plannedMinutes:number; acceptedRecently:number; skippedRecently:number;
 };

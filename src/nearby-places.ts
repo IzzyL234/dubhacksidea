@@ -1,4 +1,4 @@
-export type NearbyPlace={id:string;name:string;label:"library"|"cafe";latitude:number;longitude:number};
+export type NearbyPlace={id:string;name:string;label:"library"|"cafe"|"campus_building";latitude:number;longitude:number};
 type Point={latitude:number;longitude:number};
 const distance=(a:Point,b:Point)=>{const r=Math.PI/180,x=Math.sin((b.latitude-a.latitude)*r/2)**2+Math.cos(a.latitude*r)*Math.cos(b.latitude*r)*Math.sin((b.longitude-a.longitude)*r/2)**2;return 6371000*2*Math.asin(Math.min(1,Math.sqrt(x)));};
 export function parseNearby(data:unknown,point:Point):NearbyPlace[]{
