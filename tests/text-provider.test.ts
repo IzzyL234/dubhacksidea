@@ -1,0 +1,2 @@
+import {test,expect} from 'bun:test';import {selectTextProvider} from '../src/text-model.ts';
+test('local provider selection persists over the old environment value without changing credentials',()=>{expect(selectTextProvider('xai',{provider:'gemini'})).toBe('gemini');expect(selectTextProvider('gemini')).toBe('gemini');expect(selectTextProvider(undefined)).toBe('xai');expect(()=>selectTextProvider('xai',{provider:'unknown'})).toThrow();expect(()=>selectTextProvider('gemini',{})).toThrow();});

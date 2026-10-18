@@ -1,5 +1,7 @@
+import {readFileSync} from "node:fs";
 import {generateGemini,GeminiHttpError,type Turn} from "./gemini.ts";
-export function textProvider():"xai"|"gemini"{const provider=process.env.AI_PROVIDER??"xai";if(provider!=="xai"&&provider!=="gemini")throw Error("AI_PROVIDER must be xai or gemini");return provider;}
+export function selectTextProvider(environment:string|undefined,local?:unknown):"xai"|"gemini"{const provider=local===undefined?environment??"xai":(local as {provider?:unknown})?.provider;if(provider!=="xai"&&provider!=="gemini")throw Error("Text provider must be xai or gemini");return provider;}
+export function textProvider():"xai"|"gemini"{let local:unknown;try{local=JSON.parse(readFileSync(new URL("../data/runtime/text-provider.json",import.meta.url),"utf8"));}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}return selectTextProvider(process.env.AI_PROVIDER,local);}
 export async function generateText(instructions:string,contents:Turn[],schema?:unknown,request:typeof fetch=fetch,options:{reasoningEffort?:"low"}={}):Promise<string>{
  if(textProvider()==="gemini")return generateGemini(instructions,contents,schema,request);
  if(!process.env.XAI_API_KEY)throw Error("Configure XAI_API_KEY");
