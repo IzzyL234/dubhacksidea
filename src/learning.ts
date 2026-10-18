@@ -8,8 +8,7 @@ export type Context = {
   study_space: typeof SPACES[number];
   environment: { clutter_score: number; lighting: "dim" | "bright"; ergonomics: number };
 };
-export type LearningContext={timestamp:string;duration_mins:number|null;location:Context["location"]|null;study_space:Context["study_space"]|null;environment:{clutter_score:number|null;lighting:Context["environment"]["lighting"]|null;ergonomics:number|null}};
-export type Observation = LearningContext & {
+export type Observation = Context & {
   id: string;
   user_productivity_rating: number;
   user_mood_rating: number;
@@ -20,7 +19,6 @@ export const FEATURE_NAMES = [
   "bias", ...LOCATIONS.slice(1).map(x => `location:${x}`),
   ...SPACES.slice(1).map(x => `space:${x}`),
   "clutter", "bright_light", "ergonomics", "duration",
-  "missing:location", "missing:study_space", "missing:clutter", "missing:lighting", "missing:ergonomics", "missing:duration",
 ];
 const dimension = FEATURE_NAMES.length;
 const dot = (a: number[], b: number[]) => a.reduce((s, v, i) => s + v * b[i]!, 0);
@@ -34,23 +32,22 @@ function bounded(value: unknown, min: number, max: number, name: string): number
   return value;
 }
 
-export function features(context: LearningContext): number[] {
+export function features(context: Context): number[] {
   if (!context || !context.environment) throw new Error("Missing study environment");
-  if (context.location!==null&&!LOCATIONS.includes(context.location)) throw new Error("Unknown location");
-  if (context.study_space!==null&&!SPACES.includes(context.study_space)) throw new Error("Unknown study space");
+  if (!LOCATIONS.includes(context.location)) throw new Error("Unknown location");
+  if (!SPACES.includes(context.study_space)) throw new Error("Unknown study space");
   if (typeof context.timestamp !== "string" || !/(Z|[+-]\d{2}:\d{2})$/.test(context.timestamp)
       || !Number.isFinite(Date.parse(context.timestamp))) throw new Error("Timestamp needs a timezone offset");
-  if (context.environment.lighting!==null&&!["bright", "dim"].includes(context.environment.lighting)) throw new Error("Unknown lighting");
-  const clutter = context.environment.clutter_score===null?null:bounded(context.environment.clutter_score, 1, 10, "clutter_score");
-  const ergonomics = context.environment.ergonomics===null?null:bounded(context.environment.ergonomics, 1, 10, "ergonomics");
-  const duration = context.duration_mins===null?null:bounded(context.duration_mins, 0.000001, 1440, "duration_mins");
+  if (!["bright", "dim"].includes(context.environment.lighting)) throw new Error("Unknown lighting");
+  const clutter = bounded(context.environment.clutter_score, 1, 10, "clutter_score");
+  const ergonomics = bounded(context.environment.ergonomics, 1, 10, "ergonomics");
+  const duration = bounded(context.duration_mins, 5, 240, "duration_mins");
   // Hours/subjects are deliberately excluded: this seed generator has no time reward effect or subject field.
   // Bounding boxes and observed outcome ratings are not pre-session predictive features here.
   return [1, ...LOCATIONS.slice(1).map(x => Number(context.location === x)),
     ...SPACES.slice(1).map(x => Number(context.study_space === x)),
-    (clutter===null?0:(clutter - 1) / 9), Number(context.environment.lighting === "bright"),
-    (ergonomics===null?0:(ergonomics - 1) / 9), duration===null?0:Math.min(duration,240) / 120,
-    Number(context.location===null),Number(context.study_space===null),Number(clutter===null),Number(context.environment.lighting===null),Number(ergonomics===null),Number(duration===null)];
+    (clutter - 1) / 9, Number(context.environment.lighting === "bright"),
+    (ergonomics - 1) / 9, duration / 120];
 }
 
 export function seedObservation(row: unknown): Observation {
@@ -161,7 +158,7 @@ export class StudyLearner {
     return { learner, visitCounts, version: Number(state.version ?? 1) };
   }
 
-  predict(context: LearningContext, policy: Policy = {}) {
+  predict(context: Context, policy: Policy = {}) {
     const weight = bounded(policy.productivityWeight ?? 0.7, 0, 1, "productivityWeight");
     const alpha = bounded(policy.alpha ?? 0.2, 0, 10, "alpha");
     const x = features(context);

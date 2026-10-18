@@ -4,8 +4,7 @@ import {busyIntervals} from "./open-time.ts";
 import {TIMEZONE} from "./time.ts";
 export type StudyBooking={start:number;end:number;status:"pending"|"booked";eventId?:string;completed?:boolean};
 export async function logCompletedStudy(gateway:CalendarGateway,sessionId:string,plan:Pick<StudyBooking,"start"|"end">):Promise<string>{
- // Google Calendar returns whole-second timestamps; preserve session milliseconds locally.
- const start=Math.floor(plan.start/1000)*1000,end=Math.floor(plan.end/1000)*1000;
+ const {start,end}=plan;
  if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start||end-start>24*3600000)throw Error("INVALID_COMPLETED_STUDY");
  const id=studyEventId(sessionId);
  const event=await gateway.create({id,summary:"Study session",description:"Completed study session: actual tracked start and finish times.",start:{dateTime:new Date(start).toISOString(),timeZone:TIMEZONE},end:{dateTime:new Date(end).toISOString(),timeZone:TIMEZONE},reminders:{useDefault:false},extendedProperties:{private:{studyAgentSession:sessionId}}});
@@ -14,8 +13,7 @@ export async function logCompletedStudy(gateway:CalendarGateway,sessionId:string
 }
 export function studyEventId(sessionId:string):string{return "agent"+createHash("sha256").update(`study:${sessionId}`).digest("hex").slice(0,40);}
 export async function bookStudyEvent(gateway:CalendarGateway,sessionId:string,plan:Pick<StudyBooking,"start"|"end">):Promise<string>{
- // Google Calendar returns whole-second timestamps; preserve session milliseconds locally.
- const start=Math.floor(plan.start/1000)*1000,end=Math.floor(plan.end/1000)*1000;
+ const {start,end}=plan;
  if(!Number.isFinite(start)||!Number.isFinite(end)||end-start<5*60000||end-start>240*60000)throw Error("INVALID_STUDY_BOOKING");
  const id=studyEventId(sessionId);
  // Recheck before a write, including retries. The same session's event cannot conflict with itself.
