@@ -1,6 +1,7 @@
 import * as React from "react"
 import { addPropertyControls, ControlType, RenderTarget } from "framer"
 type Snapshot = {
+    calendar?: {status:"ready"|"unavailable";syncedAt:string|null;events:{title:string;start:string;end:string;allDay:boolean}[]}
     updatedAt: string
     dataAsOf: string | null
     model: {
@@ -256,7 +257,7 @@ export default function LearningPanel({
                             fontSize: 11,
                         }}
                     >
-                        Your study assistant
+                        Daywise / Dashboard
                     </div>
                     <h2
                         style={{
@@ -266,7 +267,7 @@ export default function LearningPanel({
                             letterSpacing: "-.04em",
                         }}
                     >
-                        Your learning, unfolding.
+                        Your day, in view.
                     </h2>
                     <p style={{ ...muted, margin: 0 }}>
                         Real sessions. Your feedback. A clearer picture of what
@@ -429,6 +430,11 @@ export default function LearningPanel({
                                       ". Estimates are associations, not guarantees."
                                     : "Complete a linked study session with workspace details and ratings to start personalizing these estimates."}
                             </p>
+                            <div style={{...card,marginTop:18}}>
+                                <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"center"}}><h3 style={{fontSize:17,margin:"0 0 8px"}}>Upcoming events</h3><span style={{...muted,fontSize:11}}>Hackathon Demo · Pacific</span></div>
+                                {data.calendar?.status==="ready" ? data.calendar.events.length ? data.calendar.events.map((event,i)=><div key={event.start+i} style={{display:"flex",gap:14,alignItems:"start",padding:"14px 0",borderTop:i?"1px solid #eee":undefined}}><span style={{width:4,alignSelf:"stretch",borderRadius:4,background:accent}}/><div><div style={{fontSize:14,fontWeight:550}}>{event.title}</div><div style={muted}>{event.allDay ? new Date(event.start+"T12:00:00Z").toLocaleDateString(undefined,{timeZone:"America/Los_Angeles",weekday:"short",month:"short",day:"numeric"})+" · All day" : new Date(event.start).toLocaleString(undefined,{timeZone:"America/Los_Angeles",weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})+" – "+new Date(event.end).toLocaleTimeString(undefined,{timeZone:"America/Los_Angeles",hour:"numeric",minute:"2-digit"})}</div></div></div>) : <p style={muted}>No upcoming events in the next seven days.</p> : <p style={muted}>Calendar has not synced yet. The running bot refreshes upcoming events about once a minute.</p>}
+                                {data.calendar?.syncedAt&&<p style={{...muted,fontSize:11,marginBottom:0}}>Calendar last synced {when(data.calendar.syncedAt)}</p>}
+                            </div>
                             <div style={{ ...card, marginTop: 18 }}>
                                 <h3 style={{ fontSize: 17, margin: "0 0 8px" }}>
                                     Your recent sessions

@@ -1,3 +1,4 @@
+import {configuredDashboardCalendar} from "./dashboard-calendar.ts";
 import {StudyDeparture} from "./study-departure.ts";
 import {isStudyTimeRequest,studyTimeReply} from "./study-time.ts";
 import {photoAttachment} from "./photo-input.ts";
@@ -120,6 +121,10 @@ async function retryFeedbackSync() {
     console.error("Feedback sync will retry. Local copies are kept.");
   } finally { feedbackSyncRunning = false; }
 }
+const dashboardCalendar=configuredDashboardCalendar(demoCalendar);
+async function syncDashboardCalendar(){try{await dashboardCalendar?.sync();}catch{console.error("Dashboard calendar sync deferred; check migration 011 and Calendar connection.");}}
+void syncDashboardCalendar();
+setInterval(()=>void syncDashboardCalendar(),60000).unref();
 void retryFeedbackSync();
 setInterval(() => void retryFeedbackSync(), 60_000).unref();
 
