@@ -48,3 +48,12 @@ test('moving away before confirming a UW building saves nothing',async()=>{
  const s=await setup();await s.reminders.tick();s.time(1);await s.reminders.tick();s.time(3);await s.reminders.tick();s.move();
  expect(await s.reminders.handle('chat','yes','moved')).toContain('Nothing was saved');expect(s.starts).toBe(0);
 });
+
+test('conversational location uses the same fresh UW lookup without leaking coordinates or saving a place',async()=>{
+ const s=await setup();const direct=await s.smart.handle('chat','+15555550123','where am i');const evidence=await s.smart.currentPlace('chat');expect(evidence.status).toBe('fresh');expect(direct).toContain(evidence.building!);expect(evidence.building).toContain('HUB');expect(JSON.stringify(evidence)).not.toContain('latitude');expect(JSON.stringify(evidence)).not.toContain('longitude');expect(JSON.stringify(evidence)).not.toContain('+15555550123');expect(s.sent).toHaveLength(0);expect(s.starts).toBe(0);
+});
+test('conversational location distinguishes stale snapshots from a fresh unnamed region',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'location-evidence-'));dirs.push(root);let stale=true;
+ const smart=new SmartPrompts({now:()=>noon,read:async()=>({...hubPoint,accuracy:10,locationTimestamp:new Date(noon-(stale?180000:0)),locationType:'live',isLocatingInProgress:false}),lookup:async()=>[],decide:async()=>({action:'stay_quiet',reason:'poor_timing',confidence:1})},root);
+ expect((await smart.currentPlace('chat','+15555550123')).status).toBe('stale');stale=false;const result=await smart.currentPlace('chat','+15555550123');expect(result.status).toBe('fresh');expect(result.building).toBeNull();expect(result.category).toBe('unknown');
+});

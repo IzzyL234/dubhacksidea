@@ -3,18 +3,11 @@ import { readFile } from "node:fs/promises";
 import { parseCalendarTime } from "./time.ts";
 import { busyIntervals } from "./open-time.ts";
 import type { CalendarGateway, DemoEvent } from "./calendar-types.ts";
-export const DEMO_CALENDAR = process.env.GOOGLE_CALENDAR_ID || "c_8a3f88a63add1862899e38c8eb168366805a752ed4bc3283303e5a68823964bf@group.calendar.google.com";
+export const DEMO_CALENDAR = process.env.GOOGLE_CALENDAR_ID?.trim() || "c_8a3f88a63add1862899e38c8eb168366805a752ed4bc3283303e5a68823964bf@group.calendar.google.com";
 async function calendarClient(write=false) {
   let token;
-  try {token=JSON.parse(await readFile(new URL(write?"../.google-calendar-write-token.json":"../.google-calendar-token.json",import.meta.url),"utf8"));}
-  catch(e){
-    if(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN){
-      token={client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,refresh_token:process.env.GOOGLE_REFRESH_TOKEN};
-    } else {
-      if(write&&(e as NodeJS.ErrnoException).code==="ENOENT")throw Error("CALENDAR_WRITE_AUTH_REQUIRED");
-      throw e;
-    }
-  }
+  try {token=JSON.parse(await readFile((write?process.env.GOOGLE_CALENDAR_WRITE_TOKEN_FILE:process.env.GOOGLE_CALENDAR_TOKEN_FILE) || new URL(write?"../.google-calendar-write-token.json":"../.google-calendar-token.json",import.meta.url),"utf8"));}
+  catch(e){if(write&&(e as NodeJS.ErrnoException).code==="ENOENT")throw Error("CALENDAR_WRITE_AUTH_REQUIRED");throw e;}
   const auth=new google.auth.OAuth2(token.client_id,token.client_secret);auth.setCredentials({refresh_token:token.refresh_token});
   return google.calendar({version:"v3",auth});
 }
@@ -23,7 +16,7 @@ export const demoCalendar:CalendarGateway={
     const client=await calendarClient();const events:DemoEvent[]=[];let pageToken:string|undefined;
     do{
       const {data}=await client.events.list({calendarId:DEMO_CALENDAR,timeMin:new Date(from).toISOString(),timeMax:new Date(to).toISOString(),
-        singleEvents:true,orderBy:"startTime",maxResults:2500,pageToken,fields:"nextPageToken,items(id,etag,summary,status,start,end,transparency,attendees,extendedProperties)"},{timeout:20000});
+        singleEvents:true,orderBy:"startTime",maxResults:2500,pageToken,fields:"nextPageToken,items(id,etag,summary,status,recurringEventId,recurrence,start,end,transparency,attendees,extendedProperties)"},{timeout:20000});
       events.push(...data.items??[]);pageToken=data.nextPageToken??undefined;
     }while(pageToken);return events;
   },

@@ -32,3 +32,18 @@ data/user_models/
 
 data/photos_log.json
 data/sessions_history.jsonl
+
+data/dashboard/
+
+data/departures/
+
+data/schedule-reviews/
+data/insights/
+
+.vercel/
+
+.vercel
+
+data/agent-turns/
+
+data/daily-brief/

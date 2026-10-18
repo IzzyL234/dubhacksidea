@@ -94,7 +94,10 @@
       ]
     },
     "user_productivity_rating": 2,
-    "user_mood_rating": 1
+    "user_mood_rating": 1,
+    "user_distraction_rating": 4,
+    "distraction_attribution": "interruption",
+    "distraction_source": "phone"
   },
   {
     "id": "sess_002",
@@ -201,7 +204,10 @@
       ]
     },
     "user_productivity_rating": 2,
-    "user_mood_rating": 2
+    "user_mood_rating": 2,
+    "user_distraction_rating": 2,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_003",
@@ -298,7 +304,10 @@
       ]
     },
     "user_productivity_rating": 1,
-    "user_mood_rating": 1
+    "user_mood_rating": 1,
+    "user_distraction_rating": 4,
+    "distraction_attribution": "unsure",
+    "distraction_source": "other"
   },
   {
     "id": "sess_004",
@@ -345,7 +354,10 @@
       ]
     },
     "user_productivity_rating": 3,
-    "user_mood_rating": 2
+    "user_mood_rating": 2,
+    "user_distraction_rating": 5,
+    "distraction_attribution": "interruption",
+    "distraction_source": "phone"
   },
   {
     "id": "sess_005",
@@ -402,7 +414,10 @@
       ]
     },
     "user_productivity_rating": 4,
-    "user_mood_rating": 3
+    "user_mood_rating": 3,
+    "user_distraction_rating": 5,
+    "distraction_attribution": "interruption",
+    "distraction_source": "phone"
   },
   {
     "id": "sess_006",
@@ -449,7 +464,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 4
+    "user_mood_rating": 4,
+    "user_distraction_rating": 3,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_007",
@@ -506,7 +524,10 @@
       ]
     },
     "user_productivity_rating": 4,
-    "user_mood_rating": 3
+    "user_mood_rating": 3,
+    "user_distraction_rating": 5,
+    "distraction_attribution": "interruption",
+    "distraction_source": "phone"
   },
   {
     "id": "sess_008",
@@ -583,7 +604,10 @@
       ]
     },
     "user_productivity_rating": 2,
-    "user_mood_rating": 1
+    "user_mood_rating": 1,
+    "user_distraction_rating": 3,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_009",
@@ -670,7 +694,10 @@
       ]
     },
     "user_productivity_rating": 1,
-    "user_mood_rating": 2
+    "user_mood_rating": 2,
+    "user_distraction_rating": 2,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_010",
@@ -737,7 +764,10 @@
       ]
     },
     "user_productivity_rating": 4,
-    "user_mood_rating": 3
+    "user_mood_rating": 3,
+    "user_distraction_rating": 5,
+    "distraction_attribution": "setup",
+    "distraction_source": "surroundings"
   },
   {
     "id": "sess_011",
@@ -794,7 +824,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 4
+    "user_mood_rating": 4,
+    "user_distraction_rating": 2,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_012",
@@ -841,7 +874,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 4
+    "user_mood_rating": 4,
+    "user_distraction_rating": 4,
+    "distraction_attribution": "interruption",
+    "distraction_source": "phone"
   },
   {
     "id": "sess_013",
@@ -888,7 +924,10 @@
       ]
     },
     "user_productivity_rating": 4,
-    "user_mood_rating": 3
+    "user_mood_rating": 3,
+    "user_distraction_rating": 1,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_014",
@@ -935,7 +974,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 4
+    "user_mood_rating": 4,
+    "user_distraction_rating": 2,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_015",
@@ -982,7 +1024,10 @@
       ]
     },
     "user_productivity_rating": 4,
-    "user_mood_rating": 4
+    "user_mood_rating": 4,
+    "user_distraction_rating": 4,
+    "distraction_attribution": "interruption",
+    "distraction_source": "phone"
   },
   {
     "id": "sess_016",
@@ -1059,7 +1104,10 @@
       ]
     },
     "user_productivity_rating": 4,
-    "user_mood_rating": 4
+    "user_mood_rating": 4,
+    "user_distraction_rating": 3,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_017",
@@ -1136,7 +1184,10 @@
       ]
     },
     "user_productivity_rating": 3,
-    "user_mood_rating": 3
+    "user_mood_rating": 3,
+    "user_distraction_rating": 1,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_018",
@@ -1193,7 +1244,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 4
+    "user_mood_rating": 4,
+    "user_distraction_rating": 2,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_019",
@@ -1260,7 +1314,10 @@
       ]
     },
     "user_productivity_rating": 4,
-    "user_mood_rating": 3
+    "user_mood_rating": 3,
+    "user_distraction_rating": 4,
+    "distraction_attribution": "interruption",
+    "distraction_source": "phone"
   },
   {
     "id": "sess_020",
@@ -1307,7 +1364,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 4
+    "user_mood_rating": 4,
+    "user_distraction_rating": 3,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_021",
@@ -1354,7 +1414,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 4
+    "user_mood_rating": 4,
+    "user_distraction_rating": 3,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_022",
@@ -1401,7 +1464,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 5
+    "user_mood_rating": 5,
+    "user_distraction_rating": 1,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_023",
@@ -1468,7 +1534,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 4
+    "user_mood_rating": 4,
+    "user_distraction_rating": 2,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_024",
@@ -1515,7 +1584,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 4
+    "user_mood_rating": 4,
+    "user_distraction_rating": 4,
+    "distraction_attribution": "setup",
+    "distraction_source": "surroundings"
   },
   {
     "id": "sess_025",
@@ -1562,7 +1634,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 4
+    "user_mood_rating": 4,
+    "user_distraction_rating": 5,
+    "distraction_attribution": "interruption",
+    "distraction_source": "phone"
   },
   {
     "id": "sess_026",
@@ -1609,7 +1684,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 5
+    "user_mood_rating": 5,
+    "user_distraction_rating": 4,
+    "distraction_attribution": "interruption",
+    "distraction_source": "phone"
   },
   {
     "id": "sess_027",
@@ -1696,7 +1774,10 @@
       ]
     },
     "user_productivity_rating": 2,
-    "user_mood_rating": 1
+    "user_mood_rating": 1,
+    "user_distraction_rating": 4,
+    "distraction_attribution": "interruption",
+    "distraction_source": "phone"
   },
   {
     "id": "sess_028",
@@ -1743,7 +1824,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 4
+    "user_mood_rating": 4,
+    "user_distraction_rating": 1,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_029",
@@ -1840,7 +1924,10 @@
       ]
     },
     "user_productivity_rating": 2,
-    "user_mood_rating": 1
+    "user_mood_rating": 1,
+    "user_distraction_rating": 4,
+    "distraction_attribution": "unsure",
+    "distraction_source": "other"
   },
   {
     "id": "sess_030",
@@ -1927,7 +2014,10 @@
       ]
     },
     "user_productivity_rating": 2,
-    "user_mood_rating": 2
+    "user_mood_rating": 2,
+    "user_distraction_rating": 4,
+    "distraction_attribution": "interruption",
+    "distraction_source": "phone"
   },
   {
     "id": "sess_031",
@@ -2004,7 +2094,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 5
+    "user_mood_rating": 5,
+    "user_distraction_rating": 3,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_032",
@@ -2071,7 +2164,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 4
+    "user_mood_rating": 4,
+    "user_distraction_rating": 2,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_033",
@@ -2168,7 +2264,10 @@
       ]
     },
     "user_productivity_rating": 1,
-    "user_mood_rating": 3
+    "user_mood_rating": 3,
+    "user_distraction_rating": 5,
+    "distraction_attribution": "unsure",
+    "distraction_source": "other"
   },
   {
     "id": "sess_034",
@@ -2275,7 +2374,10 @@
       ]
     },
     "user_productivity_rating": 1,
-    "user_mood_rating": 2
+    "user_mood_rating": 2,
+    "user_distraction_rating": 1,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_035",
@@ -2362,7 +2464,10 @@
       ]
     },
     "user_productivity_rating": 2,
-    "user_mood_rating": 2
+    "user_mood_rating": 2,
+    "user_distraction_rating": 2,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_036",
@@ -2409,7 +2514,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 4
+    "user_mood_rating": 4,
+    "user_distraction_rating": 2,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_037",
@@ -2476,7 +2584,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 4
+    "user_mood_rating": 4,
+    "user_distraction_rating": 4,
+    "distraction_attribution": "unsure",
+    "distraction_source": "other"
   },
   {
     "id": "sess_038",
@@ -2523,7 +2634,10 @@
       ]
     },
     "user_productivity_rating": 5,
-    "user_mood_rating": 5
+    "user_mood_rating": 5,
+    "user_distraction_rating": 3,
+    "distraction_attribution": null,
+    "distraction_source": null
   },
   {
     "id": "sess_039",
@@ -2600,7 +2714,10 @@
       ]
     },
     "user_productivity_rating": 1,
-    "user_mood_rating": 2
+    "user_mood_rating": 2,
+    "user_distraction_rating": 4,
+    "distraction_attribution": "setup",
+    "distraction_source": "surroundings"
   },
   {
     "id": "sess_040",
@@ -2687,6 +2804,9 @@
       ]
     },
     "user_productivity_rating": 2,
-    "user_mood_rating": 3
+    "user_mood_rating": 3,
+    "user_distraction_rating": 2,
+    "distraction_attribution": null,
+    "distraction_source": null
   }
 ]

@@ -1,3 +1,4 @@
+import {describedPlace} from "./session-place.ts";
 import {photoAttachment} from "./photo-input.ts";
 export function isStudyRecommendation(text:string):boolean {
  return /(?:where (?:should|can|could|would) (?:i|we) (?:go (?:to )?)?study|where (?:do you|would you) (?:suggest|recommend).*study|(?:recommend|suggest|find|pick).*(?:study (?:spot|space|location)|place to study)|best (?:place|spot) (?:for me )?to study)/i.test(text);
@@ -37,7 +38,7 @@ export type PhotoLogEntry = {
   source: "perceptron";
 };
 
-type Document = { energyAsked?:string[];energyQuestion?:{sessionId:string;expires:number}; calendarBookings?:Record<string,StudyBooking>; sessions: StudySession[]; replies: { id: string; text: string }[] };
+type Document = { placeQuestion?:{sessionId:string;resume:string};placeDescriptions?:Record<string,string>; energyAsked?:string[];energyQuestion?:{sessionId:string;expires:number}; calendarBookings?:Record<string,StudyBooking>; sessions: StudySession[]; replies: { id: string; text: string }[] };
 export interface SessionSink {
   put(session: StudySession): Promise<void>;
   putPhotoLog?(entry: PhotoLogEntry): Promise<void>;
@@ -164,6 +165,26 @@ export class StudySessions {
       const doc=await this.read(key),session=doc.sessions.at(-1);
       return {sessionStatus:session?.status??"none",feedbackRecorded:Boolean(session?.feedback_id)};
     });
+  }
+  async placeSession(conversation:string){const key=hash(conversation);return this.serialized(key,async()=>{const s=(await this.read(key)).sessions.find(s=>s.status==="active"||s.status==="awaiting_feedback");return s?{id:s.id,startedAt:s.started_at,endedAt:s.ended_at,location:s.location}:null;});}
+  async recordDetectedPlace(conversation:string,id:string,place:Context["location"]){if(!LOCATIONS.includes(place))return;const key=hash(conversation);await this.serialized(key,async()=>{const doc=await this.read(key),s=doc.sessions.find(s=>s.id===id&&["active","awaiting_feedback"].includes(s.status));if(s&&!s.location){s.location=place;await this.save(key,doc);}});}
+  async placeCheckIn(conversation:string,text:string,begin=false):Promise<{reply?:string;resume?:string}|null>{
+    const key=hash(conversation);if(begin)await this.beginFeedback(key);
+    return this.serialized(key,async()=>{const doc=await this.read(key),s=doc.sessions.find(s=>s.status==="active"||s.status==="awaiting_feedback");
+      if(!s){if(doc.placeQuestion){delete doc.placeQuestion;await this.save(key,doc);}return null;}
+      if(s.location){if(doc.placeQuestion){const resume=doc.placeQuestion.resume;delete doc.placeQuestion;await this.save(key,doc);return {resume};}return null;}
+      if(begin){doc.placeQuestion={sessionId:s.id,resume:text};await this.save(key,doc);return {reply:"I couldn’t identify your study place from location data. Where were you studying? A short description is fine—for example, library, cafe, home, dorm room, or classroom. Reply skip to leave it unknown."};}
+      if(!doc.placeQuestion||doc.placeQuestion.sessionId!==s.id)return null;
+      if(/^(discard session|reset)$/i.test(text.trim())){delete doc.placeQuestion;await this.save(key,doc);return null;}
+      if(/^(skip|cancel)$/i.test(text.trim())){const resume=doc.placeQuestion.resume;delete doc.placeQuestion;await this.save(key,doc);return {resume};}
+      if(/^[1-5]$/.test(text.trim()))return {reply:"First, where were you studying? Reply library, cafe, home, dorm room, classroom, or skip. I’ll ask for the ratings next."};
+      const place=describedPlace(text);
+      if(!place)return {reply:"Which category best fits that place: library, cafe, home, dorm room, or classroom? You can reply skip if none fits."};
+      s.location=place;doc.placeDescriptions??={};doc.placeDescriptions[s.id]=text.trim().slice(0,300);const resume=doc.placeQuestion.resume;delete doc.placeQuestion;await this.save(key,doc);return {resume};
+    });
+  }
+  async departureSession(conversation:string):Promise<{id:string;startedAt:string}|null>{
+    const key=hash(conversation);return this.serialized(key,async()=>{const session=(await this.read(key)).sessions.find(s=>s.status==="active");return session?{id:session.id,startedAt:session.started_at}:null;});
   }
   async hasUnfinished(conversation: string): Promise<boolean> {
     const key=hash(conversation);
@@ -428,11 +449,11 @@ export class StudySessions {
       const session=doc.sessions.find(s=>s.id===feedback.session_id);
       if(session&&session.user_id===key&&feedback.conversation_key===key)pairs.set(feedback.id,{session_record:session,feedback_record:feedback});
     }
-    const contexts:Context[]=[];let personal=0;const visitCounts=new Map<string,number>();
+    const contexts:Context[]=[],learningProfiles:LearningContext[]=[];let personal=0;const visitCounts=new Map<string,number>();
     for(const {session_record:session,feedback_record:feedback} of [...pairs.values()].sort((a,b)=>a.feedback_record.id.localeCompare(b.feedback_record.id))){
       if(feedback.conversation_key!==key||session.user_id!==key||session.status!=="completed"||session.feedback_id!==feedback.id||session.id!==feedback.session_id||session.is_synthetic!==false||feedback.is_synthetic!==false)continue;
       const context=learningContext(session);if(!context)continue;
-      try{learner.observe({...context,id:feedback.id,user_productivity_rating:feedback.productivity_rating,user_mood_rating:feedback.mood_rating},observationWeight(feedback));personal++;const complete=sessionContext(session);if(complete)contexts.push(complete);if(context.location&&context.study_space){const k=`${context.location}:${context.study_space}`;visitCounts.set(k,(visitCounts.get(k)??0)+1);}}catch{/* Invalid observations cannot train the model. */}
+      try{learner.observe({...context,id:feedback.id,user_productivity_rating:feedback.productivity_rating,user_mood_rating:feedback.mood_rating},observationWeight(feedback));personal++;learningProfiles.push(context);const complete=sessionContext(session);if(complete)contexts.push(complete);if(context.location&&context.study_space){const k=`${context.location}:${context.study_space}`;visitCounts.set(k,(visitCounts.get(k)??0)+1);}}catch{/* Invalid observations cannot train the model. */}
     }
     // Replay is authoritative. Cache v2 is durable and namespaced away from the Python model.
     let modelExportUnavailable=false;
@@ -441,7 +462,7 @@ export class StudySessions {
       await writeFile(temp,JSON.stringify({featureVersion:2,personalObservations:personal,demoObservations:demoObservations.length,completeProfiles:contexts.length,cloudUnavailable,model}),{mode:0o600});await rename(temp,path);
       try{await this.sink?.putModelParams?.(model);}catch{modelExportUnavailable=true;}
     }
-    return {learner,rows,personal,cloudUnavailable,modelExportUnavailable,visitCounts,contexts};
+    return {learner,rows,personal,cloudUnavailable,modelExportUnavailable,visitCounts,contexts,learningProfiles};
   }
   async rebuildDaily():Promise<{rebuilt:number;day:string}>{
     const day=localDate(this.now()),path=join(this.directory,"model-maintenance.json");
@@ -451,13 +472,35 @@ export class StudySessions {
       await mkdir(this.directory,{recursive:true});const temp=path+"."+randomUUID()+".tmp";await writeFile(temp,JSON.stringify(unavailable?{retryAfter:this.now()+5*60000}:{day}),{mode:0o600});await rename(temp,path);return {rebuilt,day};
     });
   }
+  async timeEstimates(conversation:string,start:number,lengths:number[]){
+    const key=hash(conversation);return this.serialized(key,async()=>{
+      const {learner}=await this.buildPersonalLearner(key,await this.read(key),this.demoPrior,false);
+      if(!learner.count)return [];
+      return lengths.map(minutes=>{const p=learner.predict({timestamp:new Date(start).toISOString(),duration_mins:minutes,location:null,study_space:null,environment:{clutter_score:null,lighting:null,ergonomics:null}});return {minutes,productivity:p.predictedProductivity,mood:p.predictedMood,utility:p.predictedUtility,observations:learner.count};});
+    });
+  }
+  async placeRecommendations(conversation:string){
+    const key=hash(conversation);return this.serialized(key,async()=>{
+      const {learner,learningProfiles,personal,rows,cloudUnavailable}=await this.buildPersonalLearner(key,await this.read(key),this.demoPrior,false);
+      const starterProfiles=train(rows).observations;
+      // Keep starter candidates even after the first personal rating. Prefer the latest personal profile for an identical setup.
+      const candidates=[...learningProfiles].sort((a,b)=>Date.parse(b.timestamp)-Date.parse(a.timestamp)).concat([...starterProfiles].sort((a,b)=>Date.parse(b.timestamp)-Date.parse(a.timestamp)));
+      const profiles=new Map<string,LearningContext>();
+      for(const c of candidates){if(!c.location)continue;const id=c.location+':'+(c.study_space??'unknown');if(!profiles.has(id))profiles.set(id,c);}
+      const scored=[...profiles].map(([id,c])=>{const prediction=learner.predict({...c,timestamp:new Date(this.now()).toISOString(),duration_mins:45});return {id,place:c.location,studySpace:c.study_space,productivity:prediction.predictedProductivity,mood:prediction.predictedMood,selectionScore:prediction.selectionScore,uncertainty:prediction.uncertainty,matchingPersonalSessions:learningProfiles.filter(p=>p.location===c.location&&p.study_space===c.study_space).length,profileAgeDays:Math.max(0,Math.floor((this.now()-Date.parse(c.timestamp))/86400000)),matchingStarterSessions:starterProfiles.filter(p=>p.location===c.location&&p.study_space===c.study_space).length,basis:learningProfiles.some(p=>p.location===c.location&&p.study_space===c.study_space)?'personal_history':'starter_history'};}).sort((a,b)=>b.selectionScore-a.selectionScore);
+      const places=scored.filter((p,i)=>!scored.slice(0,i).some(q=>q.place===p.place)).slice(0,5);
+      return {personalObservations:personal,starterObservations:starterProfiles.length,modelObservations:learner.count,cloudUnavailable,places,scope:'These are category-level estimates for 45 minutes using recorded workspace profiles, not current observations. The shared model includes starter data and this chat’s linked ratings. No travel time, building opening hours, or current workspace conditions were checked. A category score is not a score for a named building.'};
+    });
+  }
   async proactiveOptions(conversation:string,place:string,freeMinutes:number):Promise<LearningSummary>{
     const key=hash(conversation);
     return this.serialized(key,async()=>{
       const doc=await this.read(key);
       // The configured shared model combines demos and real observations; counts remain separate.
       const {learner,contexts,personal,rows,cloudUnavailable}=await this.buildPersonalLearner(key,doc,this.demoPrior,false);
-      return {...studyOptions(learner,contexts,place,freeMinutes,personal,cloudUnavailable,this.now()),demoObservations:rows.length,partialObservations:personal-contexts.length};
+      const summary=studyOptions(learner,contexts,place,freeMinutes,personal,cloudUnavailable,this.now());
+      if(place==="unknown"&&learner.count>0)summary.options=summary.options.map(option=>{const p=learner.predict({timestamp:new Date(this.now()).toISOString(),duration_mins:option.minutes,location:null,study_space:null,environment:{clutter_score:null,lighting:null,ergonomics:null}});return {...option,basis:"overall" as const,predictedProductivity:p.predictedProductivity,predictedMood:p.predictedMood,uncertainty:p.uncertainty,selectionScore:p.selectionScore};}).sort((a,b)=>(b.selectionScore??0)-(a.selectionScore??0));
+      return {...summary,demoObservations:rows.length,partialObservations:personal-contexts.length};
     });
   }
   private async photoPrediction(key:string,current:StudySession,doc:Document):Promise<string>{

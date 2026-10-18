@@ -20,7 +20,7 @@ type Label=typeof labels[number];
 type Place={id?:string;name?:string;label:Label;latitude:number;longitude:number;radius:number};
 type Audit={id?:string;context?:DecisionFacts;relatedDecisionId?:string;at:number;action:"stay_quiet"|"offer_study"|"offer_place"|"accepted"|"skipped";reason:string;count:number;place?:Label};
 type State={coordinatorMemory?:CoordinatorMemory;recentSamples?:Sample[];signalRegion?:{latitude:number;longitude:number;id:string};arrival?:{place:string;at:number;latitude:number;longitude:number};pendingEvents?:Record<string,Audit>;discovery?:boolean;lookupAfter?:number;lookupDay?:string;lookupCount?:number;candidate?:{place:NearbyPlace;expires:number};dismissed?:string[];enabled:boolean;address?:string;places:Place[];audit:Audit[];outcomes:{at:number;kind:"accepted"|"skipped"}[];
-  reviewAfter?:number;modelDay?:string;modelCalls?:number;offer?:{key:string;place:string;expires:number;decisionId?:string;minutes?:number;optionId?:string;region?:{latitude:number;longitude:number;radius:number}}};
+  reviewAfter?:number;modelDay?:string;modelCalls?:number;offer?:{source?:"calendar";key:string;place:string;expires:number;decisionId?:string;minutes?:number;optionId?:string;region?:{latitude:number;longitude:number;radius:number}}};
 type Sample={at:number;latitude:number;longitude:number;place:string};
 type RuntimePlace=Omit<Place,"label">&{label:Label|"unknown"};
 type Presence={confirmed?:boolean;homeStatus?:"at_saved_home"|"away_from_saved_home"|"unknown";place:RuntimePlace;stableMinutes:number;ageSeconds:number;accuracy:number};
@@ -71,6 +71,17 @@ export class SmartPrompts {
       }
       if(uploaded>=limit)return uploaded;
     }return uploaded;
+  }
+  async currentPlace(conversation:string,address?:string){
+    const state=await this.locked(keyFor(conversation),()=>this.read(keyFor(conversation)));
+    const sender=address??state.address;
+    if(!sender)return {status:'unavailable',reason:'No sender address is available for this chat.'};
+    let reading;try{reading=freshReading(await this.deps.read(sender),this.now());}catch{return {status:'unavailable',reason:'The location service did not return a usable snapshot.'};}
+    if(!reading)return {status:'stale',reason:'A reading within two minutes and accuracy of 100 meters or better is required.'};
+    const saved=state.places.filter(p=>atPlace(p,reading));
+    let places:NearbyPlace[]=[];try{places=await this.deps.lookup?.(reading)??[];}catch{/* A fresh coordinate can still be available without a building match. */}
+    const place=places.length===1?places[0]:null;
+    return {status:'fresh',capturedAt:new Date(reading.at).toISOString(),building:place?.name??null,category:saved.length===1?saved[0]!.label:place?.label??'unknown',savedName:saved.length===1?saved[0]!.name??null:null,scope:'This is a fresh building/region estimate, not continuous tracking or a workspace measurement. It does not save a place or start a session.'};
   }
   async handle(conversation:string,address:string|undefined,text:string):Promise<string|null>{
     const command=text.trim().toLowerCase().replace(/[.!?]+$/,"");
@@ -209,6 +220,7 @@ export class SmartPrompts {
       if(state.candidate&&state.candidate.expires<this.now())delete state.candidate;
       if(!this.deps.eventDriven&&this.now()<(state.reviewAfter??0))return quiet("decision_cooldown");
       const presence=this.deps.coordinatorPlaces?await this.coordinatorPresence(key,state):await this.presence(key,state);if(typeof presence==="string"){
+        if(this.deps.eventDriven&&this.deps.coordinatorPlaces&&block&&calendarAvailable&&block.end-this.now()>=30*60000)return this.calendarOpportunity(conversation,key,state,block,presence);
         if(presence==="place_confirmation_ready"&&state.candidate){await this.save(key,state);return this.placeQuestion(state.candidate.place);}
         return quiet(presence);
       }
@@ -264,6 +276,44 @@ export class SmartPrompts {
       return {allow:true,reason:decision.reason,plannedMinutes:minutes,message:`${presence.confirmed===false?(presence.place.name?"Your fresh location readings suggest you are staying near a detected building":"Your fresh location readings suggest you have stayed in one area"):"You have stayed near your saved "+presence.place.label.replaceAll("_"," ")+" spot"} and your demo calendar has ${freeMinutes} free minutes.${basis} Want to start up to a ${minutes}-minute study session and add it to Hackathon Demo? Reply yes or skip.`};
     });
   }
+  private async calendarOpportunity(conversation:string,key:string,state:State,block:StudyBlock,locationReason:string):Promise<Gate>{
+    const quiet=async(reason:string,facts?:DecisionFacts):Promise<Gate>=>{this.log(state,"stay_quiet",reason,undefined,facts);await this.save(key,state);return {allow:false,reason};};
+    const freeMinutes=Math.floor((block.end-this.now())/60000);
+    if(freeMinutes<30)return quiet("not_enough_open_time");
+    const recent=state.outcomes.filter(o=>this.now()-o.at<24*3600000);
+    const facts:DecisionFacts={source:"calendar",locationAvailable:false,place:"unknown",stableMinutes:0,locationAgeSeconds:0,accuracyMeters:0,freeMinutes,plannedMinutes:Math.min(45,freeMinutes),acceptedRecently:recent.filter(o=>o.kind==="accepted").length,skippedRecently:recent.filter(o=>o.kind==="skipped").length,placeEvidence:{confirmed:false,homeStatus:"unknown",canSave:false,calendarAvailable:true,matchedBuilding:false,arrivalCheckInEligible:false}};
+    try{facts.sessionState=await this.deps.sessionState?.(conversation);}catch{return quiet("session_state_unavailable");}
+    const session=facts.sessionState as {sessionStatus?:string;feedbackPending?:boolean}|undefined;
+    if(session?.feedbackPending||["active","awaiting_feedback"].includes(session?.sessionStatus??""))return quiet("unfinished_session_or_checkin");
+    if(this.deps.learn){try{facts.learning=await this.deps.learn(conversation,"unknown",freeMinutes);}catch{return quiet("learning_context_unavailable",facts);}}
+    const day=localDate(this.now()),memory=state.coordinatorMemory??={};
+    const signals={place:signalDigest({available:false}),calendar:signalDigest({key:block.key,start:block.start,end:block.end,freeBucket:Math.floor(freeMinutes/15)}),learning:signalDigest(facts.learning),session:signalDigest({session:facts.sessionState,outcomes:state.outcomes}),preferences:signalDigest({enabled:state.enabled})};
+    const trigger=decisionTrigger(memory,signals,this.now(),day);if(!trigger.allow)return quiet(trigger.reason);
+    facts.triggers=trigger.triggers;reserveDecision(memory,signals,this.now(),day);await this.save(key,state);
+    let decision:PromptDecision;
+    try{decision=validateSelectedOption(validateDecision(await this.deps.decide(facts)),facts);}catch(error){failedDecision(memory,this.now(),error instanceof GeminiHttpError&&error.status===429?(error.retryMs??3600000):undefined);return quiet("model_unavailable_or_invalid",facts);}
+    memory.failures=0;delete memory.retryAfter;
+    if(decision.action!=="offer_study"||decision.confidence<.75)return quiet(`model_${decision.reason}`,facts);
+    const selected=facts.learning?.options.find(o=>o.id===decision.optionId),minutes=selected?.minutes??Math.min(45,freeMinutes);
+    facts.plannedMinutes=minutes;
+    state.offer={key:block.key,place:"calendar",source:"calendar",minutes,expires:this.now()+10*60000,...(selected?{optionId:selected.id}:{})};
+    const entry=this.log(state,"offer_study","calendar_opening",undefined,facts);state.offer.decisionId=entry.id;await this.save(key,state);
+    const estimate=selected?.predictedProductivity!=null&&selected.predictedMood!=null?` Your model estimates productivity ${selected.predictedProductivity.toFixed(1)}/5 and mood ${selected.predictedMood.toFixed(1)}/5 for this length, with workspace details unknown.`:"";
+    return {allow:true,reason:"calendar_opening",plannedMinutes:minutes,message:`Your calendar has ${freeMinutes} free minutes until ${formatTime(block.end)}. Want to use ${minutes} minutes to study and add it to Hackathon Demo?${estimate} Location isn’t needed for this calendar-based suggestion. Reply yes or skip.`};
+  }
+
+  async studyPlace(conversation:string,startedAt:string,endedAt?:string|null):Promise<"library"|"cafe"|"home"|"dorm_room"|"classroom"|null>{
+    const key=keyFor(conversation);return this.locked(key,async()=>{const state=await this.read(key);if(!state.enabled||!state.address)return null;
+      const presence=await this.coordinatorPresence(key,state);await this.save(key,state);
+      if(typeof presence==="string"||!["library","cafe","home","dorm_room","classroom"].includes(presence.place.label))return null;
+      const end=endedAt?Date.parse(endedAt):this.now(),samples=(this.samples.get(key)??[]).filter(s=>s.at>=Date.parse(startedAt)&&s.at<=end);
+      if(new Set(samples.map(s=>s.at)).size<3||Math.max(...samples.map(s=>s.at))-Math.min(...samples.map(s=>s.at))<3*60000)return null;
+      return presence.place.label as "library"|"cafe"|"home"|"dorm_room"|"classroom";
+    });
+  }
+  async departureLocation(conversation:string):Promise<LocationSnapshot|null>{
+    const key=keyFor(conversation);return this.locked(key,async()=>{const state=await this.read(key);return state.enabled&&state.address?await this.deps.read(state.address):null;});
+  }
   async refreshPresence(conversation:string):Promise<void>{
     if(!this.deps.eventDriven)return;const key=keyFor(conversation);await this.locked(key,async()=>{const state=await this.read(key);if(!state.enabled)return;await this.coordinatorPresence(key,state);await this.save(key,state);});
   }
@@ -271,6 +321,7 @@ export class SmartPrompts {
     const key=keyFor(conversation);return this.locked(key,async()=>{
       const state=await this.read(key);if(!state.enabled)return true;
       if(!state.offer||state.offer.key!==block.key||state.offer.expires<this.now())return false;
+      if(state.offer.source==="calendar")return this.now()>=block.start&&block.end-this.now()>=Math.min(30,state.offer.minutes??30)*60000;
       const presence=this.deps.coordinatorPlaces?await this.coordinatorPresence(key,state):await this.presence(key,state);
       const valid=typeof presence!=="string"&&(presence.place.id??presence.place.label)===state.offer.place&&(!state.offer.region||distanceMeters(state.offer.region,presence.place)<100);
       if(!valid){this.log(state,"stay_quiet","location_changed_before_confirmation");await this.save(key,state);}
@@ -278,3 +329,4 @@ export class SmartPrompts {
     });
   }
 }
+

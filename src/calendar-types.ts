@@ -1,5 +1,5 @@
 export type DemoEvent = {
-  id?:string|null;etag?:string|null;summary?:string|null;description?:string|null;status?:string|null;
+  id?:string|null;etag?:string|null;summary?:string|null;description?:string|null;status?:string|null;recurringEventId?:string|null;recurrence?:string[]|null;
   start?:{dateTime?:string|null;date?:string|null;timeZone?:string|null}|null;
   end?:{dateTime?:string|null;date?:string|null;timeZone?:string|null}|null;
   transparency?:string|null;attendees?:unknown[]|null;extendedProperties?:{private?:Record<string,string>|null}|null;

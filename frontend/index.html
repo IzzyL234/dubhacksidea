@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/assets/styles.css" />
+  <link rel="stylesheet" href="/assets/learning.css" /><link rel="stylesheet" href="/assets/companion.css" />
 </head>
 <body>
   <!-- =====================================================================
@@ -34,6 +35,9 @@
           <path d="M 15 0 L 7.5 7.5 L 0 0 Z" transform="translate(4.5 9)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
       </button>
+      <button class="nav-tab" data-view="getStarted" id="tabGetStarted"><span class="nav-tab-label">GET STARTED</span></button>
+      <button class="nav-tab" data-view="insights" id="tabInsights"><span class="nav-tab-label">INSIGHTS</span></button>
+      <button class="nav-tab" data-view="howItWorks" id="tabHowItWorks"><span class="nav-tab-label">HOW IT WORKS</span></button>
     </nav>
   </header>
 
@@ -86,8 +90,8 @@
 
         <div class="services-header-box">
           <div class="services-pill">SERVICES</div>
-          <h2 class="services-giant-title" data-scramble="IT'S NOT YOU, IT'S YOUR PLANNER">
-            IT'S NOT YOU, IT'S YOUR PLANNER
+          <h2 class="services-giant-title" data-scramble="IF YOU FAIL TO PLAN, YOU PLAN TO FAIL">
+            IF YOU FAIL TO PLAN, YOU PLAN TO FAIL
           </h2>
         </div>
 
@@ -242,7 +246,7 @@
             <path fill="#FBBC05" d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14z"/>
             <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96z"/>
           </svg>
-          <span>CONTINUE WITH GOOGLE</span>
+          <span>PREVIEW DEMO CALENDAR</span>
           <span class="btn-arrow">&rarr;</span>
         </button>
 
@@ -258,7 +262,7 @@
        Framer Calendar Hero ("YOUR BEST CALENDAR." + Tapping Penguin #3) +
        Perforated Stamp Paper Frame with Decluttered Upcoming Tasks from Google Calendar
        ===================================================================== -->
-  <main id="viewDashboard" class="view-section hidden">
+  <main id="viewDashboard" class="view-section hidden"><section class="learning-section"><div class="learning-panel"><div id="learningConnection"></div><p data-learning-status role="status" aria-live="polite">Connect your private dashboard code to see saved history.</p></div></section><section class="learning-section"><h2>Your day, in view.</h2><div class="learning-panel" id="learningOverview"></div><div class="learning-panel"><h3>Schedule reviews</h3><div id="learningReviews"></div></div></section>
     <!-- TOP HERO SECTION (From Framer Calendar Tab: #DFDFDF Background + Royal Blue Type + Penguin #3) -->
     <section class="dashboard-framer-hero">
       <div class="framer-container">
@@ -382,6 +386,7 @@
       </div>
     </section>
 
+    <section class="learning-section"><a class="learning-calendar-link" href="https://calendar.google.com/calendar/u/0/r" target="_blank" rel="noopener noreferrer">Open in Google Calendar ↗</a><div class="learning-panel"><h3>Agent activity</h3><div id="learningActivity"></div></div></section>
     <footer class="framer-grid-footer"></footer>
   </main>
 
@@ -417,9 +422,40 @@
     </div>
   </main>
 
+
+  <main id="viewGetStarted" class="view-section hidden"><section class="learning-section"><h2>Just send a text.</h2><div class="onboarding-split"><div class="learning-places" id="learningPlaces"></div><div><h3>Your study companion</h3><ol class="learning-steps"><li><strong>Start studying.</strong> Text “start studying” and send a workspace photo.</li><li><strong>Make it yours.</strong> The agent tries location matching first. If it cannot identify the place, it asks at the end.</li><li><strong>Check in.</strong> Text “done”, then rate productivity, mood, and distractions from 1 to 5.</li><li><strong>See what works.</strong> Connect your private dashboard code to explore scores, decisions, and insights.</li></ol><a href="/dashboard">Connect on Dashboard →</a></div></div></section></main>
+  <main id="viewInsights" class="view-section hidden"><section class="learning-section"><h2>What your history tells us.</h2><p data-learning-status role="status">Connect on Dashboard to see your private history.</p><p><a href="/dashboard">← Dashboard</a></p><div id="learningInsights"></div></section></main>
+
+
+  <main id="viewHowItWorks" class="view-section hidden">
+    <section class="how-section">
+      <div class="how-eyebrow"><span class="how-dot"></span> SYSTEM ARCHITECTURE</div>
+      <div class="how-heading"><h1>How Daywise<br>learns.</h1><p>Daywise trains a personalized reward model from your study sessions and ratings. Weighted LinUCB uses learned productivity and mood estimates to rank study options. A separate language model coordinates actions, while calendar tools enforce scheduling constraints.</p></div>
+      <section class="how-demos" aria-labelledby="demoTitle"><div class="demo-heading"><div><span class="how-eyebrow">REAL EXAMPLES</span><h2 id="demoTitle">See Daywise in action.</h2><p>Watch the features in use, then explore how the system works below.</p></div><img src="/daily-still.svg" alt="" width="86" height="86" loading="lazy"></div><div class="demo-grid"><article class="demo-card"><div class="demo-media"><button type="button" data-drive-demo="1wpp3Ntb5pLmoRTsPtXEaWCDUSWJl2lYG" data-title="Calendar reviews" aria-label="Watch example: Calendar reviews"><span class="demo-play" aria-hidden="true">▶</span><span>Watch example</span><small>Google Drive</small></button></div><div class="demo-caption"><span class="demo-number">01</span><h3>Calendar reviews</h3><p>Review schedule conflicts and approve a proposed change.</p><a href="https://drive.google.com/file/d/1wpp3Ntb5pLmoRTsPtXEaWCDUSWJl2lYG/view" target="_blank" rel="noopener noreferrer">Open in Drive ↗</a></div></article><article class="demo-card"><div class="demo-media"><button type="button" data-drive-demo="1aUYmSgxiA8soXgeQ-G0CRhXFVfsGHDmj" data-title="Location sharing" aria-label="Watch example: Location sharing"><span class="demo-play" aria-hidden="true">▶</span><span>Watch example</span><small>Google Drive</small></button></div><div class="demo-caption"><span class="demo-number">02</span><h3>Location sharing</h3><p>See the location-sharing feature in use.</p><a href="https://drive.google.com/file/d/1aUYmSgxiA8soXgeQ-G0CRhXFVfsGHDmj/view" target="_blank" rel="noopener noreferrer">Open in Drive ↗</a></div></article><article class="demo-card"><div class="demo-media"><button type="button" data-drive-demo="1SWKXZK4fY44nVrZdTvjxXJrsK7Rxx0z8" data-title="Personalized study suggestions" aria-label="Watch example: Personalized study suggestions"><span class="demo-play" aria-hidden="true">▶</span><span>Watch example</span><small>Google Drive</small></button></div><div class="demo-caption"><span class="demo-number">03</span><h3>Personalized study suggestions</h3><p>Ask where to study and explore personalized answers.</p><a href="https://drive.google.com/file/d/1SWKXZK4fY44nVrZdTvjxXJrsK7Rxx0z8/view" target="_blank" rel="noopener noreferrer">Open in Drive ↗</a></div></article><article class="demo-card"><div class="demo-media"><button type="button" data-drive-demo="1GYuC0wjPEEJeptc9Ik_HGF2gtw1GY2bj" data-title="Your morning brief" aria-label="View screenshot: Your morning brief"><span class="demo-play" aria-hidden="true">▶</span><span>View screenshot</span><small>Google Drive</small></button></div><div class="demo-caption"><span class="demo-number">04</span><h3>Your morning brief</h3><p>View an example of the morning-brief message.</p><a href="https://drive.google.com/file/d/1GYuC0wjPEEJeptc9Ik_HGF2gtw1GY2bj/view" target="_blank" rel="noopener noreferrer">Open in Drive ↗</a></div></article></div><p class="demo-help">Select an example to load the Drive player. If it cannot play here, use “Open in Drive.”</p></section><section class="how-training"><span>PERSONALIZED MODEL UPDATES</span><h2>Your feedback changes the next prediction.</h2><p>Each completed, rated session adds a training example: study context is the input, and your productivity and mood ratings are the targets. The model updates its reward estimates as new feedback becomes available, so repeated patterns in your places, study setups and session lengths can influence later recommendations.</p><ol class="how-training-loop"><li><b>01</b> Record session context</li><li><b>02</b> Rate productivity + mood</li><li><b>03</b> Update reward model</li><li><b>04</b> Rank future options</li></ol><p class="how-training-note">What is trained: the personal linear reward model behind LinUCB. The underlying language model is not fine-tuned. Distraction attribution changes how strongly an observation contributes.</p></section>
+      <div class="how-diagram-heading"><h2>How the agent plans and acts.</h2><p>The agent combines conversation, scheduled check-ins and calendar tools. This overview shows how a request becomes a checked, approved action.</p></div><div class="how-flow-card"><div class="how-card-label"><span>AGENT + SCHEDULING OVERVIEW</span><a href="/agent-overview-sketch.svg" download="daywise-agent-overview.svg">Download graphic ↗</a></div><img class="how-flow-image" src="/agent-overview-sketch.svg" alt="Daywise agent overview: messages and calendar context feed a tool-using coordinator, followed by validation, approval, execution and feedback learning." width="1200" height="1100"></div><div class="how-diagram-heading"><h2>How the model and data fit together.</h2><p>The detailed diagram below shows the learning inputs, reward estimates and feedback path through Supabase.</p></div><div class="how-flow-card"><div class="how-card-label"><span>DATA FLOW + DECISION PIPELINE</span><a href="/tech-flow.svg" download="daywise-tech-flow.svg">Download graphic ↗</a></div><img class="how-flow-image" src="/tech-flow.svg" alt="Texts, optional workspace photos and location, and Google Calendar feed a bounded agent. LinUCB estimates productivity and mood. Calendar rules check availability. You approve a change, then rate a session. Private Supabase history informs future suggestions." width="1200" height="850"></div>
+      <div class="how-explore-label"><span>IMPLEMENTATION DETAILS</span><span>Select a component ↓</span></div>
+      <div class="how-explorer"><div class="how-step-list" role="group" aria-label="Explore how Daywise works"><button data-flow-step="0" aria-pressed="true"><span>01</span> Collect context <b>↗</b></button><button data-flow-step="1" aria-pressed="false"><span>02</span> Rank and coordinate <b>↗</b></button><button data-flow-step="2" aria-pressed="false"><span>03</span> Validate and execute <b>↗</b></button><button data-flow-step="3" aria-pressed="false"><span>04</span> Update from feedback <b>↗</b></button></div><article class="how-detail" id="flowDetail" aria-live="polite"></article></div>
+      <section class="how-benefits" aria-labelledby="howBenefitsTitle"><h2 id="howBenefitsTitle">Design choices and benefits</h2><div class="how-benefit-grid"><article><span>01 / SEPARATE RESPONSIBILITIES</span><h3>Language interpretation is separate from scheduling validation.</h3><p>The coordinator selects from a validated action schema. Calendar availability and conflict resolution are computed by code, so an LLM cannot invent a valid opening or bypass approval.</p></article><article><span>02 / ONLINE PERSONALIZATION</span><h3>Your ratings train personalized reward estimates.</h3><p>Productivity and mood are separate fitted reward targets. New linked session feedback updates the model used for later predictions. Recurring patterns in your recorded study contexts can shape rankings; uncertainty keeps sparse data from looking conclusive.</p></article><article><span>03 / CONTROLLED PROACTIVITY</span><h3>Meaningful changes trigger a review.</h3><p>Persistent state tracks location, availability, session progress, and previous decisions. Quiet hours, cooldowns, active sessions, and a model-call budget gate proactive messages.</p></article><article><span>04 / AUDITABLE EXECUTION</span><h3>Every calendar edit has a reviewable proposal.</h3><p>The review contains old/new times and a concrete reason. Approval checks the event version and destination again. Repeated approvals recover the same edit instead of creating a duplicate.</p></article></div></section>
+      <section class="how-limits"><h2>How optional session notes inform decisions</h2><p>After a study session, you can describe anything else that affected it. The language model extracts sentiment, social context and explicitly mentioned factors, then asks you to confirm them. Confirmed notes accompany your actual ratings when the coordinator considers future prompts. A difficult assignment can explain a low rating without proving that the library was a poor place to study.</p><p>These notes provide context for reasoning. They do not replace your ratings or directly change LinUCB scores. Repeated confirmed factors can provide descriptive evidence, but they do not establish causes or describe your current situation.</p></section>
+      <section class="how-limits"><h2>Current model scope</h2><p>Daywise uses a contextual-bandit approach, not an end-to-end reinforcement-learning policy. Features describe place, study setup, workspace conditions, duration, and missing data. Time of day and subject are not predictive features in this MVP. Distraction is collected after the session and affects feedback weighting; it is not a third predicted reward.</p><p>Environment scores are associations, not evidence that a place caused an outcome. Calendar-conflict proposals use a deterministic minimum-movement rule, not a learned claim that another hour will improve productivity.</p></section>
+    </section>
+  </main>
+  <aside class="daily-widget" id="dailyWidget" aria-label="Daily companion">
+    <section class="daily-panel" id="dailyPanel" role="dialog" aria-label="Your Daily companion" hidden>
+      <header class="daily-panel-top"><div><span class="daily-kicker">YOUR LITTLE STUDY SIDEKICK</span><h2 id="dailyGreeting">Hey, you.</h2></div><button id="dailyClose" class="daily-icon-button" aria-label="Close Daily">×</button></header>
+      <nav class="daily-tabs" aria-label="Companion sections"><button data-daily-tab="today" aria-pressed="true">Ask Daily</button><button data-daily-tab="yours" aria-pressed="false">Make it yours</button></nav>
+      <div id="dailyToday" class="daily-tab-content"><p id="dailyMessage">Ask me how Daywise works.</p><div class="daily-guide-log" id="dailyGuideLog" role="log" aria-live="polite" aria-label="Daywise project questions"><p class="daily-guide-answer">I can explain the model, data flow, proactive prompts, feedback, and calendar approval. My answers come from verified project notes.</p></div><div class="daily-guide-suggestions"><button data-guide-question="How does the model learn?">How does it learn?</button><button data-guide-question="How are calendar changes approved?">Calendar approvals</button><button data-guide-question="Why use LinUCB?">Why LinUCB?</button></div><form id="dailyGuideForm" class="daily-guide-form"><label class="sr-only" for="dailyQuestion">Ask about Daywise</label><input id="dailyQuestion" maxlength="400" placeholder="Ask about Daywise…" autocomplete="off" required><button type="submit" aria-label="Send question">↑</button></form><p class="daily-fineprint">Verified project notes · no live LLM, personal data access, or calendar actions.</p></div>
+      <div id="dailyYours" class="daily-tab-content" hidden><form id="dailyPreferences"><label for="dailyName">What should I call you?</label><input id="dailyName" maxlength="28" placeholder="Your nickname" autocomplete="off"><label class="daily-checkbox"><input type="checkbox" id="dailyCalm"> Keep things still (less motion)</label><button class="daily-primary" type="submit">That’s my vibe ✓</button><p class="daily-fineprint" id="dailySaved" role="status">Saved only in this browser. These preferences change your companion, not the learning model.</p></form></div>
+    </section>
+    <button class="daily-launcher" id="dailyLauncher" aria-label="Open Daily, your study companion" aria-expanded="false" aria-controls="dailyPanel"><span class="daily-hello" id="dailyHello">A little help?</span><img src="/daily.svg" alt="" width="96" height="96"><span class="daily-online" aria-hidden="true"></span></button>
+  </aside>
+
   <!-- Toast Notification -->
   <div class="toast-banner hidden" id="appToast"></div>
 
   <script type="module" src="/assets/app.js"></script>
+  <script type="module" src="/assets/learning.js"></script>
+  <script type="module" src="/assets/companion.js"></script>
+  <script type="module" src="/assets/effects.js"></script>
 </body>
 </html>

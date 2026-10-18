@@ -12,6 +12,7 @@
 const state = {
   currentView: "home", // "home" | "dashboard" | "approve"
   activeBatchId: null,
+  learningSnapshot: null,
   calendarData: null,
   gcalSample: null,
   pendingProposals: [],
@@ -28,10 +29,10 @@ function formatShortTimeRange(startIso, endIso) {
   try {
     const s = new Date(startIso);
     const e = endIso ? new Date(endIso) : null;
-    const dayStr = s.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-    const sTime = s.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    const dayStr = s.toLocaleDateString("en-US", { timeZone:"America/Los_Angeles", weekday: "short", month: "short", day: "numeric" });
+    const sTime = s.toLocaleTimeString("en-US", { timeZone:"America/Los_Angeles", hour: "numeric", minute: "2-digit" });
     if (!e || isNaN(e.getTime())) return `${dayStr} · ${sTime}`;
-    const eTime = e.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    const eTime = e.toLocaleTimeString("en-US", { timeZone:"America/Los_Angeles", hour: "numeric", minute: "2-digit" });
     return `${dayStr} · ${sTime} – ${eTime}`;
   } catch {
     return String(startIso);
@@ -63,9 +64,11 @@ function showToast(msg) {
 // =====================================================================
 const CIPHER_CHARS = "+/F25Y9CXJ%=@&5L?0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
+const motionIsReduced=()=>document.body.classList.contains("daily-calm")||window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 function runScramble(element) {
   if (!element || element._scrambleRunning) return;
   const original = element.getAttribute("data-scramble") || element.innerText.trim();
+  if(motionIsReduced()){element.innerText=original;return;}
   element._scrambleRunning = true;
   let frame = 0;
   const totalFrames = 26;
@@ -275,6 +278,7 @@ function initStretchType() {
       return;
     }
 
+    if(motionIsReduced()||state.currentView!=="home"){layout.letterNodes.forEach(node=>node.removeAttribute("transform"));if(coordLabel)coordLabel.style.opacity="0";requestAnimationFrame(frameLoop);return;}
     const rect = root.getBoundingClientRect();
     const scale = root.offsetWidth ? rect.width / root.offsetWidth || 1 : 1;
     const localX = (pointer.x - rect.left) / scale;
@@ -338,6 +342,9 @@ function setView(viewName, options = {}) {
   const views = {
     home: document.getElementById("viewHome"),
     dashboard: document.getElementById("viewDashboard"),
+    getStarted: document.getElementById("viewGetStarted"),
+    insights: document.getElementById("viewInsights"),
+    howItWorks: document.getElementById("viewHowItWorks"),
     approve: document.getElementById("viewApprove"),
   };
 
@@ -354,10 +361,14 @@ function setView(viewName, options = {}) {
 
   const tabHome = document.getElementById("tabHome");
   const tabDashboard = document.getElementById("tabDashboard");
-  [tabHome, tabDashboard].forEach(btn => btn?.classList.remove("active-navy"));
+  [tabHome, tabDashboard, document.getElementById("tabGetStarted"), document.getElementById("tabInsights"), document.getElementById("tabHowItWorks")].forEach(btn => btn?.classList.remove("active-navy"));
 
   if (viewName === "home") {
     tabHome?.classList.add("active-navy");
+  } else if(viewName === "howItWorks") {
+    document.getElementById("tabHowItWorks")?.classList.add("active-navy");
+  } else if (viewName === "insights" || viewName === "getStarted") {
+    document.getElementById(viewName === "insights" ? "tabInsights" : "tabGetStarted")?.classList.add("active-navy");
   } else {
     tabDashboard?.classList.add("active-navy");
   }
@@ -365,6 +376,9 @@ function setView(viewName, options = {}) {
   if (!options.skipHistory) {
     let targetUrl = "/";
     if (viewName === "dashboard") targetUrl = "/dashboard";
+    else if (viewName === "insights") targetUrl = "/insights";
+    else if(viewName === "howItWorks") targetUrl = "/how-it-works";
+    else if (viewName === "getStarted") targetUrl = "/about";
     else if (viewName === "approve") {
       targetUrl = state.activeBatchId ? `/approve/${encodeURIComponent(state.activeBatchId)}` : "/approve";
     }
@@ -398,7 +412,13 @@ function handleInitialRoute() {
     showToast("Connected to Google Calendar via OAuth 2.0!");
   }
 
-  if (path.startsWith("/approve/")) {
+  if(path === "/how-it-works") {
+    setView("howItWorks", {skipHistory:true});
+  } else if (path === "/insights") {
+    setView("insights", {skipHistory:true});
+  } else if (path === "/about") {
+    setView("getStarted", {skipHistory:true});
+  } else if (path.startsWith("/approve/")) {
     const batchId = decodeURIComponent(path.replace("/approve/", "").replace(/\/+$/, ""));
     setView("approve", { batchId, skipHistory: true });
   } else if (path === "/approve") {
@@ -493,25 +513,20 @@ function renderDashboard() {
   const dateSubLabelEl = document.getElementById("dashDateSubLabel");
   const footerLabelEl = document.getElementById("dashCalendarFooterLabel");
 
-  const gcalTasks =
-    Array.isArray(gcal.upcoming_tasks) && gcal.upcoming_tasks.length > 0
-      ? gcal.upcoming_tasks
-      : Array.isArray(gcal.today_events_sample) && gcal.today_events_sample.length > 0
-        ? gcal.today_events_sample
-        : [...(cal.events || []), ...(cal.scheduled_blocks || cal.blocks || [])];
-
-  const sampleTasks = gcalTasks.slice(0, 6);
+  const liveCalendar=state.learningSnapshot?.calendar;
+  const gcalTasks=state.learningSnapshot ? (liveCalendar?.status==="ready"?liveCalendar.events.map(e=>({title:e.title,start_time:e.start,end_time:e.end,all_day:e.allDay,source:"google_calendar_live"})):[]) : (Array.isArray(gcal.upcoming_tasks)?gcal.upcoming_tasks:[]);
+  const sampleTasks = gcalTasks.slice(0, 5);
 
   if (eventsBadgeEl) {
     eventsBadgeEl.textContent = `${sampleTasks.length} UPCOMING`;
   }
   if (dateSubLabelEl) {
-    const calName = gcal.user?.calendar_name || "GOOGLE CALENDAR SAMPLE";
+    const calName = state.learningSnapshot ? "Google Calendar · Pacific" : (gcal.status === "ready" ? "Google Calendar · Live · Pacific" : "Google Calendar connection unavailable");
     dateSubLabelEl.textContent = calName.toUpperCase();
   }
   if (footerLabelEl) {
     const calIdShort = (gcal.calendar_id || state.authStatus?.calendar_id || "GOOGLE CALENDAR").slice(0, 36);
-    footerLabelEl.textContent = `PULLED FROM GOOGLE CALENDAR INTEGRATION · ${calIdShort}`;
+    footerLabelEl.textContent = state.learningSnapshot ? (state.learningSnapshot.calendar?.status === "ready" ? "LIVE CALENDAR · LAST SYNC "+formatShortTimeRange(state.learningSnapshot.calendar.syncedAt) : "LIVE CALENDAR UNAVAILABLE · WAITING FOR BOT SYNC") : (gcal.status === "ready" ? "LIVE GOOGLE CALENDAR" : "CALENDAR UNAVAILABLE · NO SAMPLE EVENTS SUBSTITUTED");
   }
 
   if (eventsListEl) {
@@ -519,8 +534,8 @@ function renderDashboard() {
       eventsListEl.innerHTML = `
         <div class="upcoming-task-row">
           <div class="upcoming-task-left">
-            <div class="upcoming-task-title">No upcoming tasks found for today</div>
-            <div class="upcoming-task-time">Connected to Google Calendar integration</div>
+            <div class="upcoming-task-title">No upcoming events to display</div>
+            <div class="upcoming-task-time">Check the connection and calendar sync status above</div>
           </div>
           <span class="upcoming-task-badge">ALL CLEAR</span>
         </div>
@@ -532,12 +547,12 @@ function renderDashboard() {
             ? `STUDY · ${String(task.recommended_location).toUpperCase()}`
             : task.source === "google_calendar_live"
               ? "GOOGLE CALENDAR LIVE"
-              : "GOOGLE CALENDAR";
+              : "DEMO CALENDAR";
           return `
             <div class="upcoming-task-row">
               <div class="upcoming-task-left">
                 <div class="upcoming-task-title">${escapeHtml(task.title)}</div>
-                <div class="upcoming-task-time">${escapeHtml(formatShortTimeRange(task.start_time, task.end_time))}</div>
+                <div class="upcoming-task-time">${escapeHtml(task.all_day ? new Date(task.start_time+"T12:00:00Z").toLocaleDateString("en-US",{timeZone:"America/Los_Angeles",month:"short",day:"numeric"})+" · All day" : formatShortTimeRange(task.start_time, task.end_time))}</div>
               </div>
               <span class="upcoming-task-badge">${escapeHtml(badgeText)}</span>
             </div>
@@ -843,6 +858,9 @@ function setupEventListeners() {
   // Top Navigation Tabs (HOME | DASHBOARD)
   document.getElementById("tabHome")?.addEventListener("click", () => setView("home"));
   document.getElementById("tabDashboard")?.addEventListener("click", () => setView("dashboard"));
+  document.getElementById("tabGetStarted")?.addEventListener("click", () => setView("getStarted"));
+  document.getElementById("tabInsights")?.addEventListener("click", () => setView("insights"));
+  document.getElementById("tabHowItWorks")?.addEventListener("click", () => setView("howItWorks"));
 
   document.getElementById("navPendingPill")?.addEventListener("click", () => {
     const latest = state.pendingProposals[state.pendingProposals.length - 1];
@@ -864,7 +882,7 @@ function setupEventListeners() {
   // GET STARTED -> Open Google OAuth Modal
   const oauthModal = document.getElementById("oauthModalBackdrop");
   document.getElementById("btnGetStarted")?.addEventListener("click", () => {
-    oauthModal?.classList.remove("hidden");
+    setView("getStarted");
   });
   document.getElementById("btnCloseOauthModal")?.addEventListener("click", () => {
     oauthModal?.classList.add("hidden");
@@ -882,8 +900,8 @@ function setupEventListeners() {
       });
     } catch {}
     oauthModal?.classList.add("hidden");
-    if (btn) btn.querySelector("span").textContent = "CONTINUE WITH GOOGLE";
-    showToast("Signed in with Google OAuth! Pulling upcoming tasks...");
+    if (btn) btn.querySelector("span").textContent = "PREVIEW DEMO CALENDAR";
+    showToast("Demo calendar preview opened. Connect your bot dashboard code for live data.");
     setView("dashboard");
   });
 
@@ -937,3 +955,5 @@ document.addEventListener("DOMContentLoaded", () => {
   handleInitialRoute();
   void refreshAllData();
 });
+
+window.addEventListener("daywise:learning",event=>{state.learningSnapshot=event.detail;renderDashboard();});
