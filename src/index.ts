@@ -1,3 +1,4 @@
+import {StudyDeparture} from "./study-departure.ts";
 import {photoAttachment} from "./photo-input.ts";
 import {acquireInstance,AlreadyRunning} from "./single-instance.ts";
 import {fileURLToPath as instanceFilePath} from "node:url";
@@ -85,8 +86,9 @@ const messaging = imessage(app);
 const calendarCommands = new CalendarCommands(demoCalendar,undefined,Date.now,interpretCalendar);
 const stagedProposals = new StagedProposalEngine(demoCalendar);
 const smartPrompts = new SmartPrompts({eventDriven:true,sessionState:async c=>({...await studySessions.chatContext(c),feedbackPending:await feedbackFlow.hasDraft(c)}),coordinatorPlaces:true,learn:async(c,p,m)=>({...await studySessions.proactiveOptions(c,p,m),sessionContext:await sessionContext.summary(c)}),events:configuredEventSink(),read:readPhotonLocation,decide:decidePrompt,lookup:lookupCampusBuildings,localBuildings:true});
+const departures=new StudyDeparture({session:c=>studySessions.departureSession(c),read:c=>smartPrompts.departureLocation(c),send:async(c,text)=>{const space=await messaging.space.get(c);await space.send(text);}});
 const reminders = new StudyReminders({
-  refresh:c=>smartPrompts.refreshPresence(c),
+  refresh:async c=>{await departures.tick(c);await smartPrompts.refreshPresence(c);},
   promptBudget:6,
   resolvePlace:(c,accept)=>smartPrompts.resolvePlace(c,accept),
   coordinate:(c,b,available)=>smartPrompts.evaluate(c,b,available),
@@ -198,7 +200,7 @@ for await (const [space, envelope] of app.messages) {
   }
   if (message.content.type !== "text") continue;
 
-  const incoming = message.content.text.trim();
+  let incoming = message.content.text.trim();
   if (!incoming) continue;
 
   try {
@@ -232,6 +234,8 @@ for await (const [space, envelope] of app.messages) {
       }
     }
 
+    const departureAnswer=await departures.answer(space.id,incoming);
+    if(departureAnswer){if(departureAnswer.done)incoming="done";else{await space.send(departureAnswer.reply!);continue;}}
     if(incoming.toLowerCase()==="smart prompts on"){
       const connected=await reminders.handle(space.id,"reminders on",message.id+":connect");
       if(!await reminders.enabledFor(space.id)){await space.send(connected??"Could not connect reminders.");continue;}
