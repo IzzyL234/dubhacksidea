@@ -1,3 +1,4 @@
+import {configuredEventSink} from "./proactivity-store.ts";
 import {lookupCampusBuildings} from "./uw-buildings.ts";
 import { SmartPrompts } from "./smart-prompts.ts";
 import { decidePrompt } from "./proactive-decision.ts";
@@ -38,7 +39,7 @@ const locationTrial = new LocationTrial();
 const locationDiagnostics = new LocationDiagnostics();
 const messaging = imessage(app);
 const calendarCommands = new CalendarCommands(demoCalendar);
-const smartPrompts = new SmartPrompts({read:readPhotonLocation,decide:decidePrompt,lookup:lookupCampusBuildings,localBuildings:true});
+const smartPrompts = new SmartPrompts({events:configuredEventSink(),read:readPhotonLocation,decide:decidePrompt,lookup:lookupCampusBuildings,localBuildings:true});
 const reminders = new StudyReminders({
   observe:c=>smartPrompts.observe(c),
   resolvePlace:(c,accept)=>smartPrompts.resolvePlace(c,accept),
@@ -70,6 +71,7 @@ async function retryFeedbackSync() {
   try {
     try { await studySessions.syncPending(); }
     catch { console.error("Session cloud sync deferred. Local sessions are kept; check the session migration."); }
+    try {await smartPrompts.syncPending();}catch{console.error("Proactivity events queued; check Supabase migration 006 and connection.");}
     const result = await feedbackFlow.syncPending();
     if (result.synced) console.log(`Uploaded ${result.synced} pending feedback check-in(s).`);
   } catch {

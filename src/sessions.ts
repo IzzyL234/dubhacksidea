@@ -1,3 +1,4 @@
+import {configuredLearningStore,type StudyHistorySource,type LearningPair} from "./learning-store.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -17,6 +18,12 @@ type Document = { sessions: StudySession[]; replies: { id: string; text: string 
 export interface SessionSink { put(session: StudySession): Promise<void> }
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 export function observationWeight(feedback: SessionFeedback): number {
+  if (feedback.distraction_rating < 4) return 1;
+  const attribution=(feedback as SessionFeedback & {distraction_attribution?:string|null}).distraction_attribution;
+  if (attribution === "interruption") return 0.25;
+  // Unknown is kept unknown; no causal correction is inferred. Both setup and unsure
+  // retain ordinary weight. Preserve the legacy rule only for older records.
+  if (attribution != null) return 1;
   return feedback.distraction_rating >= 4 && ["phone", "other"].includes(feedback.distraction_source ?? "") ? 0.25 : 1;
 }
 export function sessionContext(session: StudySession): Context | null {
@@ -48,7 +55,8 @@ export class StudySessions {
     private sink: SessionSink | null = configuredSessions(),
     private feedbackDirectory = fileURLToPath(new URL("../data/feedback/records/", import.meta.url)),
     private seedFile = fileURLToPath(new URL("../data/seed_sessions.json", import.meta.url)),
-    private vision = analyzePhoto) {}
+    private vision = analyzePhoto,
+    private history:StudyHistorySource|null = sink instanceof SupabaseSessions?configuredLearningStore():null) {}
   private async serialized<T>(key: string, action: () => Promise<T>): Promise<T> {
     const before = this.locks.get(key) ?? Promise.resolve();
     const operation = before.catch(() => {}).then(action);
@@ -190,19 +198,24 @@ export class StudySessions {
     });
   }
   private async score(key: string, current: StudySession, doc: Document): Promise<string> {
-    const rows=JSON.parse(await readFile(this.seedFile,"utf8"));
-    const {learner}=train(rows);
+    const rows=process.env.STUDY_DEMO_SEEDS==="true"?JSON.parse(await readFile(this.seedFile,"utf8")):[];
+    const {learner}=train(rows);const pairs=new Map<string,LearningPair>();let cloudUnavailable=false;
+    if(this.history){try{for(const pair of await this.history.load(key)){if(pair?.feedback_record?.id)pairs.set(pair.feedback_record.id,pair);}}catch{cloudUnavailable=true;}}
     let names:string[]=[];
     try{names=await readdir(this.feedbackDirectory);}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
-    let personal=0;
-    for(const name of names.filter(n=>/^[a-f0-9-]{36}\.json$/i.test(n)).sort()) {
+    for(const name of names.filter(n=>/^[a-f0-9-]{36}\.json$/i.test(n)).sort()){
       const feedback=JSON.parse(await readFile(join(this.feedbackDirectory,name),"utf8")) as SessionFeedback;
-      if(feedback.conversation_key!==key||!feedback.session_id)continue;
-      const session=doc.sessions.find(s=>s.id===feedback.session_id&&s.status==="completed"&&s.feedback_id===feedback.id);
-      const context=session&&sessionContext(session);if(!context)continue;
-      learner.observe({...context,id:feedback.id,user_productivity_rating:feedback.productivity_rating,user_mood_rating:feedback.mood_rating},observationWeight(feedback));personal++;
+      const session=doc.sessions.find(s=>s.id===feedback.session_id);
+      if(session&&!pairs.has(feedback.id))pairs.set(feedback.id,{session_record:session,feedback_record:feedback});
+    }
+    let personal=0;
+    for(const {session_record:session,feedback_record:feedback} of [...pairs.values()].sort((a,b)=>a.feedback_record.id.localeCompare(b.feedback_record.id))){
+      if(!session||!feedback)continue;
+      if(feedback.conversation_key!==key||session.user_id!==key||session.status!=="completed"||session.feedback_id!==feedback.id||session.id!==feedback.session_id||session.is_synthetic!==false||feedback.is_synthetic!==false)continue;
+      const context=sessionContext(session);if(!context)continue;
+      try{learner.observe({...context,id:feedback.id,user_productivity_rating:feedback.productivity_rating,user_mood_rating:feedback.mood_rating},observationWeight(feedback));personal++;}catch{/* Invalid observations cannot train the model. */}
     }
     const prediction=learner.predict(sessionContext(current)!);
-    return `Estimated productivity ${prediction.predictedProductivity.toFixed(1)}/5, mood ${prediction.predictedMood.toFixed(1)}/5. Based on ${rows.length} synthetic starter examples + ${personal} of your linked check-ins. These are associations, not guarantees. Planned duration is used; actual elapsed time is stored separately.`;
+    return `Estimated productivity ${prediction.predictedProductivity.toFixed(1)}/5, mood ${prediction.predictedMood.toFixed(1)}/5. Based on ${personal} of your linked check-ins.${rows.length?` DEMO: also includes ${rows.length} synthetic starter examples.`:""}${cloudUnavailable?" Cloud history unavailable; using local feedback only.":this.history?" Supabase history and pending local feedback replayed without duplicate ratings.":" Local feedback only; Supabase learning is not configured."} These are associations, not guarantees. Planned duration is used; actual elapsed time is stored separately.`;
   }
 }

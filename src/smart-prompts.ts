@@ -1,3 +1,5 @@
+import {readdir} from "node:fs/promises";
+import type {EventSink} from "./proactivity-store.ts";
 import {locationFailureReply,locationFailureKind} from "./photon-location.ts";
 import {matchesCampusPlace} from "./uw-buildings.ts";
 import {chooseNearby,type NearbyPlace} from "./nearby-places.ts";
@@ -13,13 +15,13 @@ import { validateDecision,type DecisionFacts,type PromptDecision } from "./proac
 const labels=["library","cafe","home","dorm_room","classroom","campus_building"] as const;
 type Label=typeof labels[number];
 type Place={id?:string;name?:string;label:Label;latitude:number;longitude:number;radius:number};
-type Audit={at:number;action:"stay_quiet"|"offer_study"|"offer_place"|"accepted"|"skipped";reason:string;count:number;place?:Label};
-type State={discovery?:boolean;lookupAfter?:number;lookupDay?:string;lookupCount?:number;candidate?:{place:NearbyPlace;expires:number};dismissed?:string[];enabled:boolean;address?:string;places:Place[];audit:Audit[];outcomes:{at:number;kind:"accepted"|"skipped"}[];
-  reviewAfter?:number;modelDay?:string;modelCalls?:number;offer?:{key:string;place:string;expires:number}};
+type Audit={id?:string;context?:DecisionFacts;relatedDecisionId?:string;at:number;action:"stay_quiet"|"offer_study"|"offer_place"|"accepted"|"skipped";reason:string;count:number;place?:Label};
+type State={pendingEvents?:Record<string,Audit>;discovery?:boolean;lookupAfter?:number;lookupDay?:string;lookupCount?:number;candidate?:{place:NearbyPlace;expires:number};dismissed?:string[];enabled:boolean;address?:string;places:Place[];audit:Audit[];outcomes:{at:number;kind:"accepted"|"skipped"}[];
+  reviewAfter?:number;modelDay?:string;modelCalls?:number;offer?:{key:string;place:string;expires:number;decisionId?:string}};
 type Sample={at:number;latitude:number;longitude:number;place:string};
 type Presence={place:Place;stableMinutes:number;ageSeconds:number;accuracy:number};
 export type Gate={allow:boolean;reason:string;message?:string;kind?:"place"};
-export type SmartDependencies={localBuildings?:boolean;lookup?:(point:{latitude:number;longitude:number;accuracy?:number})=>Promise<NearbyPlace[]>;read:(address:string)=>Promise<LocationSnapshot>;decide:(facts:DecisionFacts)=>Promise<PromptDecision>;now?:()=>number};
+export type SmartDependencies={events?:EventSink|null;localBuildings?:boolean;lookup?:(point:{latitude:number;longitude:number;accuracy?:number})=>Promise<NearbyPlace[]>;read:(address:string)=>Promise<LocationSnapshot>;decide:(facts:DecisionFacts)=>Promise<PromptDecision>;now?:()=>number};
 const keyFor=(s:string)=>createHash("sha256").update(s).digest("hex");
 const atPlace=(place:{id?:string;latitude:number;longitude:number;radius?:number},reading:{latitude:number;longitude:number;accuracy:number})=>place.id?.startsWith("uw:")?matchesCampusPlace(place.id,reading):distanceMeters(place,reading)+reading.accuracy<=(place.radius??200);
 const timestamp=(value:string|Date|undefined)=>value instanceof Date?value.getTime():value?Date.parse(value):NaN;
@@ -47,11 +49,24 @@ export class SmartPrompts {
   }
   private async read(key:string):Promise<State>{try{return JSON.parse(await readFile(join(this.directory,`${key}.json`),"utf8"));}
     catch(e){if((e as NodeJS.ErrnoException).code==="ENOENT")return {enabled:false,places:[],audit:[],outcomes:[]};throw e;}}
-  private async save(key:string,state:State){await mkdir(this.directory,{recursive:true});const path=join(this.directory,`${key}.json`),tmp=`${path}.${randomUUID()}.tmp`;
+  private async save(key:string,state:State){for(const a of state.audit){if(!a.id){a.id=randomUUID();(state.pendingEvents??={})[a.id]={...a};}}await mkdir(this.directory,{recursive:true});const path=join(this.directory,`${key}.json`),tmp=`${path}.${randomUUID()}.tmp`;
     await writeFile(tmp,JSON.stringify(state),{mode:0o600});await rename(tmp,path);}
-  private log(state:State,action:Audit["action"],reason:string,place?:Label){
-    const last=state.audit.at(-1);if(last&&last.action===action&&last.reason===reason&&last.place===place&&this.now()-last.at<15*60000){last.count++;return;}
-    state.audit=[...state.audit,{at:this.now(),action,reason,count:1,...(place?{place}:{})}].slice(-100);
+  private log(state:State,action:Audit["action"],reason:string,place?:Label,context?:DecisionFacts,relatedDecisionId?:string):Audit{
+    const last=state.audit.at(-1);
+    if(last&&last.action===action&&last.reason===reason&&last.place===place&&!context&&!relatedDecisionId&&this.now()-last.at<15*60000){last.count++;last.id??=randomUUID();(state.pendingEvents??={})[last.id]={...last};return last;}
+    const audit:Audit={id:randomUUID(),at:this.now(),action,reason,count:1,...(place?{place}:{}),...(context?{context}:{}),...(relatedDecisionId?{relatedDecisionId}:{})};
+    state.audit=[...state.audit,audit].slice(-100);(state.pendingEvents??={})[audit.id!]={...audit};return audit;
+  }
+  async syncPending(limit=20):Promise<number>{
+    if(!this.deps.events)return 0;let names:string[]=[];try{names=await readdir(this.directory);}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}let uploaded=0;
+    for(const name of names.filter(n=>/^[a-f0-9]{64}\.json$/.test(n))){const key=name.slice(0,-5);
+      const pending=await this.locked(key,async()=>Object.entries((await this.read(key)).pendingEvents??{}).slice(0,Math.max(0,limit-uploaded)));
+      for(const [id,a]of pending){
+        await this.deps.events.put({id,user_key:key,reported_at:new Date(a.at).toISOString(),action:a.action,reason:a.reason,occurrence_count:a.count,...(a.place?{place_category:a.place}:{}),...(a.context?{decision_context:a.context}:{}),...(a.relatedDecisionId?{related_decision_id:a.relatedDecisionId}:{})});
+        await this.locked(key,async()=>{const state=await this.read(key);if(state.pendingEvents?.[id]?.count===a.count)delete state.pendingEvents[id];await this.save(key,state);});uploaded++;
+      }
+      if(uploaded>=limit)return uploaded;
+    }return uploaded;
   }
   async handle(conversation:string,address:string|undefined,text:string):Promise<string|null>{
     const command=text.trim().toLowerCase().replace(/[.!?]+$/,"");
@@ -95,7 +110,7 @@ export class SmartPrompts {
   async outcome(conversation:string,kind:"accepted"|"skipped"):Promise<void>{
     const key=keyFor(conversation);await this.locked(key,async()=>{const state=await this.read(key);if(!state.enabled)return;
       state.outcomes=[...state.outcomes.filter(o=>this.now()-o.at<7*86400_000),{at:this.now(),kind}].slice(-50);
-      if(kind==="skipped")state.reviewAfter=this.now()+60*60000;delete state.offer;this.log(state,kind,kind==="skipped"?"user_skipped":"user_confirmed");await this.save(key,state);});
+      const decisionId=state.offer?.decisionId;if(kind==="skipped")state.reviewAfter=this.now()+60*60000;delete state.offer;this.log(state,kind,kind==="skipped"?"user_skipped":"user_confirmed",undefined,undefined,decisionId);await this.save(key,state);});
   }
   private async presence(key:string,state:State):Promise<Presence|string>{
     if(!state.address)return "sender_not_connected";
@@ -152,7 +167,7 @@ export class SmartPrompts {
   async evaluate(conversation:string,block:StudyBlock):Promise<Gate>{
     const key=keyFor(conversation);return this.locked(key,async()=>{
       const state=await this.read(key);if(!state.enabled)return {allow:true,reason:"calendar_only"};
-      const quiet=async(reason:string):Promise<Gate>=>{this.log(state,"stay_quiet",reason);await this.save(key,state);return{allow:false,reason};};
+      const quiet=async(reason:string,context?:DecisionFacts):Promise<Gate>=>{this.log(state,"stay_quiet",reason,undefined,context);await this.save(key,state);return{allow:false,reason};};
       if(!state.places.length&&(!state.discovery||!this.deps.lookup))return quiet("no_saved_places");
       if(state.candidate&&state.candidate.expires<this.now())delete state.candidate;
       if(this.now()<(state.reviewAfter??0))return quiet("decision_cooldown");
@@ -166,13 +181,14 @@ export class SmartPrompts {
       state.modelCalls=(state.modelCalls??0)+1;state.reviewAfter=this.now()+10*60000;
       await this.save(key,state); // Reserve the model budget before an external call.
       const recent=state.outcomes.filter(o=>this.now()-o.at<24*3600_000);
-      let decision:PromptDecision;
-      try{decision=validateDecision(await this.deps.decide({place:presence.place.label,stableMinutes:presence.stableMinutes,
+      const facts:DecisionFacts={place:presence.place.label,stableMinutes:presence.stableMinutes,
         locationAgeSeconds:presence.ageSeconds,accuracyMeters:presence.accuracy,freeMinutes,plannedMinutes:Math.min(45,freeMinutes),
-        acceptedRecently:recent.filter(o=>o.kind==="accepted").length,skippedRecently:recent.filter(o=>o.kind==="skipped").length}));}
-      catch{return quiet("model_unavailable_or_invalid");}
-      if(decision.action!=="offer_study"||decision.confidence<0.75)return quiet(`model_${decision.reason}`);
-      state.offer={key:block.key,place:presence.place.id??presence.place.label,expires:this.now()+10*60000};this.log(state,"offer_study",decision.reason,presence.place.label);await this.save(key,state);
+        acceptedRecently:recent.filter(o=>o.kind==="accepted").length,skippedRecently:recent.filter(o=>o.kind==="skipped").length};
+      let decision:PromptDecision;
+      try{decision=validateDecision(await this.deps.decide(facts));}
+      catch{return quiet("model_unavailable_or_invalid",facts);}
+      if(decision.action!=="offer_study"||decision.confidence<0.75)return quiet(`model_${decision.reason}`,facts);
+      state.offer={key:block.key,place:presence.place.id??presence.place.label,expires:this.now()+10*60000};const audit=this.log(state,"offer_study",decision.reason,presence.place.label,facts);state.offer.decisionId=audit.id;await this.save(key,state);
       return {allow:true,reason:decision.reason,message:`You've stayed near your saved ${presence.place.label.replaceAll("_"," ")} spot and your demo calendar has ${freeMinutes} free minutes. Want a ${Math.min(45,freeMinutes)}-minute study session? Reply yes or skip.`};
     });
   }
