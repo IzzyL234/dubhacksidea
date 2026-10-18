@@ -254,6 +254,10 @@ class StagedChangeProposal(BaseModel):
     veyzl_audit: VeyzlAudit = Field(default_factory=VeyzlAudit)
     status: ProposalStatus = Field("pending", description="Lifecycle status of the proposal batch")
     rejection_feedback: Optional[str] = Field(None, description="Optional user reason if rejected")
+    approval_url: Optional[str] = Field(
+        None,
+        description="Web URL where the user can visually review and approve/reject the staged changes",
+    )
 
 
 # =====================================================================

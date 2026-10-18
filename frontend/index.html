@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DAYWISE — Optimizing Your Day | DubHacks '26</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <!-- =====================================================================
+       TOP NAVIGATION BAR (Two Tabs Only: HOME | DASHBOARD)
+       Auto-hides on scroll down, reveals on scroll up (matching Framer)
+       ===================================================================== -->
+  <header class="top-nav-bar" id="topNavBar">
+    <div class="nav-left-strip">
+      <button class="pending-approval-pill hidden" id="navPendingPill">
+        <span class="pulse-dot"></span>
+        <span id="navPendingCountText">1 STAGED APPROVAL</span>
+      </button>
+    </div>
+    <nav class="nav-tabs" aria-label="Primary Navigation">
+      <button class="nav-tab active-navy" data-view="home" id="tabHome">
+        <span class="nav-tab-label">HOME</span>
+        <svg class="nav-tab-triangle" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M 15 0 L 7.5 7.5 L 0 0 Z" transform="translate(4.5 9)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+      <button class="nav-tab" data-view="dashboard" id="tabDashboard">
+        <span class="nav-tab-label">DASHBOARD</span>
+        <svg class="nav-tab-triangle" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M 15 0 L 7.5 7.5 L 0 0 Z" transform="translate(4.5 9)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+    </nav>
+  </header>
+
+  <!-- =====================================================================
+       VIEW 1: SPLASHPAGE INTRODUCTION (`/` or `#home`)
+       Recreates Framer StretchType Hero + Sticky Stacking Cards + Scramble Text
+       ===================================================================== -->
+  <main id="viewHome" class="view-section active">
+    <!-- HERO SECTION (`StretchType` Interactive DAYWISE Lockup) -->
+    <section class="framer-hero-section" id="splashSlide0">
+      <div class="framer-container">
+        <div class="hero-meta-bar">
+          <span class="hero-meta-spacer"></span>
+          <span class="hero-meta-center">OPTIMIZING YOUR DAY</span>
+          <span class="hero-meta-right">
+            <span class="hero-white-dot"></span>
+            <span>DUBHACKS' 26</span>
+          </span>
+        </div>
+
+        <div class="stretch-type-area">
+          <div class="stretch-type-root" id="daywiseStretchRoot" aria-label="DAYWISE">
+            <h1 class="sr-only">DAYWISE</h1>
+            <svg id="daywiseStretchSvg" aria-hidden="true" width="100%" height="100%">
+              <defs>
+                <clipPath id="daywiseStretchClip">
+                  <rect id="daywiseClipRect" x="-1200" y="-1200" width="3600" height="1600"></rect>
+                </clipPath>
+              </defs>
+              <text id="daywiseMeasurer" x="0" y="-10000" visibility="hidden">DAYWISE</text>
+              <g id="daywiseLettersGroup" clip-path="url(#daywiseStretchClip)" fill="#FFFFFF"></g>
+            </svg>
+            <div class="stretch-coord-badge" id="daywiseCoordBadge" aria-hidden="true">X 0000 &middot; Y 0000</div>
+          </div>
+        </div>
+
+        <div class="hero-bottom-area">
+          <p class="hero-lead-copy">
+            Your brain isn't bad at planning. Traditional<br />
+            planners are bad at understanding your brain.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- SERVICES / STICKY STACKING RESEARCH CARDS SECTION -->
+    <section class="framer-services-section" id="splashSlide1">
+      <div class="framer-container">
+        <div class="services-top-divider"></div>
+
+        <div class="services-header-box">
+          <div class="services-pill">SERVICES</div>
+          <h2 class="services-giant-title" data-scramble="IT'S NOT YOU, IT'S YOUR PLANNER">
+            IT'S NOT YOU, IT'S YOUR PLANNER
+          </h2>
+        </div>
+
+        <!-- Sticky Stacking Card List (Each card sticks at top: 100px and stacks over the previous) -->
+        <div class="cards-stack-list">
+          <!-- CARD 1: EMBER NAVY (`#002857`) -->
+          <article class="stack-card stack-card-ember" id="splashCard1">
+            <div class="stack-card-top">
+              <h3 class="stack-card-heading" data-scramble="70% OF STUDENTS MISSED THEIR OWN PREDICTED DEADLINE.">
+                70% OF STUDENTS MISSED<br />
+                THEIR OWN PREDICTED DEADLINE.
+              </h3>
+              <p class="stack-card-body">
+                Most students are terrible at<br />
+                estimating how long a task will take.
+              </p>
+            </div>
+            <div class="stack-card-citation">
+              BUEHLER, ROGER; DALE GRIFFIN; MICHAEL ROSS (1994). "EXPLORING THE "PLANNING FALLACY"
+            </div>
+          </article>
+
+          <!-- CARD 2: BONE (`#E8E8E8`) -->
+          <article class="stack-card stack-card-bone" id="splashSlide2">
+            <div class="stack-card-top">
+              <h3 class="stack-card-heading-blue" data-scramble="WHEN YOU STUDY MATTERS.">
+                WHEN YOU STUDY MATTERS.
+              </h3>
+              <p class="stack-card-body-blue">
+                Evening-type students got 66.4% for<br />
+                evening-type students when schedules<br />
+                didn't align with their natural rhythms.
+              </p>
+            </div>
+            <div class="stack-card-citation-blue">
+              IMAM ET AL., BULLETIN OF FACULTY OF PHYSICAL THERAPY (2024)
+            </div>
+          </article>
+
+          <!-- CARD 3: EMBER NAVY (`#002857`) -->
+          <article class="stack-card stack-card-ember" id="splashSlide3">
+            <div class="stack-card-top">
+              <h3 class="stack-card-heading" data-scramble="PLAN FOR YOUR FUTURE.">
+                PLAN FOR YOUR FUTURE.
+              </h3>
+              <p class="stack-card-body">
+                People frequently experience competing<br />
+                desires and goals, which impacts their<br />
+                ability to plan with the future in mind.
+              </p>
+            </div>
+            <div class="stack-card-citation">
+              HOFMANN ET AL. (2012) "EVERYDAY TEMPTATIONS"
+            </div>
+          </article>
+
+          <!-- CARD 4: MEET DAILY CTA CARD (`#E8E8E8`) -->
+          <article class="stack-card stack-card-cta" id="splashSlide4">
+            <div class="daily-mascot-wrap">
+              <!-- Exact Framer Penguin #1 SVG (Floating + Blinking Eyes, Holding Book & Pencil) -->
+              <svg viewBox="0 0 120 120" width="120" height="120" class="flexi-blue-penguin-wrap flexi-blue-penguin-float" aria-label="Blue penguin with glasses holding a book and pencil" role="img">
+                <defs>
+                  <filter id="flexi-blue-penguin-shadow-1" x="-35%" y="-35%" width="170%" height="170%">
+                    <feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#000" flood-opacity="0.18"></feDropShadow>
+                  </filter>
+                  <linearGradient id="flexi-blue-penguin-blue-1" x1="30" y1="20" x2="90" y2="98" gradientUnits="userSpaceOnUse">
+                    <stop offset="0%" stop-color="rgb(110, 196, 240)"></stop>
+                    <stop offset="55%" stop-color="rgb(110, 196, 240)" stop-opacity="0.92"></stop>
+                    <stop offset="100%" stop-color="#4A90D9"></stop>
+                  </linearGradient>
+                </defs>
+                <g filter="url(#flexi-blue-penguin-shadow-1)">
+                  <path d="M 26 42 Q 26 22 60 20 Q 94 22 94 56 Q 96 90 60 98 Q 24 88 26 54 Z" fill="none" stroke="#ffffff" stroke-width="11.4" stroke-linejoin="round" stroke-linecap="round"></path>
+                  <path d="M 26 42 Q 26 22 60 20 Q 94 22 94 56 Q 96 90 60 98 Q 24 88 26 54 Z" fill="url(#flexi-blue-penguin-blue-1)" stroke="#1a1a1a" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round"></path>
+                  <ellipse cx="60" cy="64" rx="24" ry="28" fill="#FFFFFF" stroke="none"></ellipse>
+                  <g stroke="#1a1a1a" stroke-linejoin="round" stroke-linecap="round">
+                    <path d="M 60 88 L 40 76 Q 36 72 40 68 L 58 72 Z" fill="#FFF6E8" stroke-width="2.2"></path>
+                    <path d="M 60 88 L 80 76 Q 84 72 80 68 L 62 72 Z" fill="#FFF6E8" stroke-width="2.2"></path>
+                    <path d="M 58 88 L 60 70 L 62 88 Z" fill="#E6D9C6" stroke-width="2"></path>
+                    <path d="M 46 73 L 56 77 M 46 76 L 54 79" fill="none" stroke-width="1.4" opacity="0.55"></path>
+                    <path d="M 74 73 L 64 77 M 74 76 L 66 79" fill="none" stroke-width="1.4" opacity="0.55"></path>
+                  </g>
+                  <g stroke="#1a1a1a" stroke-linejoin="round" stroke-linecap="round">
+                    <path d="M 94 78 L 104 58 L 108 60 L 98 80 Z" fill="#FFCA28" stroke-width="2.2"></path>
+                    <path d="M 104 58 L 106 52 L 110 54 L 108 60 Z" fill="#FF8FAB" stroke-width="2"></path>
+                    <path d="M 94 78 L 92 82 L 96 83 Z" fill="#5C5C5C" stroke-width="1.8"></path>
+                  </g>
+                  <g fill="url(#flexi-blue-penguin-blue-1)" stroke="#1a1a1a" stroke-width="2.6" stroke-linejoin="round">
+                    <ellipse cx="26" cy="76" rx="9" ry="11"></ellipse>
+                    <ellipse cx="94" cy="76" rx="9" ry="11"></ellipse>
+                  </g>
+                  <ellipse cx="38" cy="62" rx="7" ry="7" fill="#FF8FAB" opacity="0.85" stroke="none"></ellipse>
+                  <ellipse cx="82" cy="62" rx="7" ry="7" fill="#FF8FAB" opacity="0.85" stroke="none"></ellipse>
+                  <g stroke="#1a1a1a" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="44" cy="50" r="13" stroke-width="2.8" fill="rgba(255,255,255,0.35)"></circle>
+                    <circle cx="76" cy="50" r="13" stroke-width="2.8" fill="rgba(255,255,255,0.35)"></circle>
+                    <path d="M 57 50 L 63 50" stroke-width="2.8"></path>
+                    <path d="M 31 48 L 38 50" stroke-width="2.4"></path>
+                    <path d="M 89 48 L 82 50" stroke-width="2.4"></path>
+                  </g>
+                  <g class="flexi-blue-penguin-eyes">
+                    <circle cx="44" cy="52" r="4" fill="#1a1a1a" stroke="none"></circle>
+                    <circle cx="76" cy="52" r="4" fill="#1a1a1a" stroke="none"></circle>
+                  </g>
+                  <path d="M 60 58 L 56 66 L 64 66 Z" fill="#F4A055" stroke="#1a1a1a" stroke-width="2.4" stroke-linejoin="round"></path>
+                  <path d="M 54 68 Q 60 72 66 68" fill="none" stroke="#1a1a1a" stroke-width="2" stroke-linecap="round"></path>
+                  <g fill="#F4A055" stroke="#1a1a1a" stroke-width="2.6" stroke-linejoin="round">
+                    <ellipse cx="46" cy="96" rx="10" ry="6"></ellipse>
+                    <ellipse cx="74" cy="96" rx="10" ry="6"></ellipse>
+                  </g>
+                </g>
+              </svg>
+            </div>
+
+            <p class="meet-daily-title">Meet Daily, your new personal planner.</p>
+
+            <button class="get-started-btn" id="btnGetStarted">
+              <span>GET STARTED</span>
+              <svg class="btn-arrow-svg" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- SUBTLE GRID FOOTER (Matching Framer Bottom Grid Section) -->
+    <footer class="framer-grid-footer"></footer>
+  </main>
+
+  <!-- =====================================================================
+       GOOGLE OAUTH LOGIN MODAL (Triggered by clicking GET STARTED)
+       ===================================================================== -->
+  <div class="modal-backdrop hidden" id="oauthModalBackdrop" role="dialog" aria-modal="true" aria-labelledby="oauthModalTitle">
+    <div class="oauth-modal-card">
+      <div class="oauth-modal-header">
+        <span class="services-pill oauth-pill">GOOGLE OAUTH 2.0</span>
+        <button class="modal-close-btn" id="btnCloseOauthModal" aria-label="Close">&times;</button>
+      </div>
+
+      <h2 class="oauth-modal-title" id="oauthModalTitle">SIGN IN WITH GOOGLE</h2>
+      <p class="oauth-modal-subtitle">
+        Connect your Google Calendar to pull your upcoming tasks for the day into your Daywise Dashboard.
+      </p>
+
+      <div class="oauth-actions">
+        <button class="google-signin-btn" id="btnGoogleSignIn">
+          <svg class="google-g-icon" viewBox="0 0 24 24" width="20" height="20">
+            <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.54-5.17 3.54-8.97z"/>
+            <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24z"/>
+            <path fill="#FBBC05" d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14z"/>
+            <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96z"/>
+          </svg>
+          <span>CONTINUE WITH GOOGLE</span>
+          <span class="btn-arrow">&rarr;</span>
+        </button>
+
+        <button class="oauth-redirect-link-btn" id="btnGoogleRedirectFlow">
+          Launch Google OAuth redirect &nearr;
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =====================================================================
+       VIEW 2: DASHBOARD (`/dashboard`)
+       Framer Calendar Hero ("YOUR BEST CALENDAR." + Tapping Penguin #3) +
+       Perforated Stamp Paper Frame with Decluttered Upcoming Tasks from Google Calendar
+       ===================================================================== -->
+  <main id="viewDashboard" class="view-section hidden">
+    <!-- TOP HERO SECTION (From Framer Calendar Tab: #DFDFDF Background + Royal Blue Type + Penguin #3) -->
+    <section class="dashboard-framer-hero">
+      <div class="framer-container">
+        <!-- Optional Banner Only Shown When a Photon SMS Approval Batch is Pending -->
+        <div class="staged-alert-banner hidden" id="dashStagedBanner">
+          <div class="staged-alert-left">
+            <span class="staged-badge-live">STAGED CHANGES</span>
+            <div>
+              <h3 class="staged-alert-title" id="dashStagedTitle">Pending schedule changes from Photon</h3>
+              <p class="staged-alert-sub" id="dashStagedSub">Click to review and approve your proposed changes.</p>
+            </div>
+          </div>
+          <button class="staged-review-btn" id="btnOpenApprovalFromBanner">
+            <span>REVIEW &amp; APPROVE</span>
+            <span>&rarr;</span>
+          </button>
+        </div>
+
+        <div class="dashboard-hero-pill-row">
+          <span class="services-pill-blue">MANAGE YOUR CALENDAR</span>
+        </div>
+
+        <div class="dashboard-hero-split">
+          <h1 class="dashboard-giant-blue-title" data-scramble="YOUR BEST CALENDAR.">
+            YOUR BEST<br />CALENDAR.
+          </h1>
+
+          <div class="dashboard-mascot-col">
+            <p class="dashboard-mascot-caption">Leave the planning to Daily!</p>
+            <!-- Exact Framer Penguin #3 SVG (Tapping Pencil on Head While Holding a Book) -->
+            <svg viewBox="0 0 120 120" width="120" height="120" class="flexi-blue-penguin-wrap flexi-blue-penguin-float" aria-label="Blue penguin tapping pencil on head while holding a book" role="img">
+              <defs>
+                <filter id="flexi-blue-penguin-shadow-3" x="-35%" y="-35%" width="170%" height="170%">
+                  <feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#000" flood-opacity="0.18"></feDropShadow>
+                </filter>
+                <linearGradient id="flexi-blue-penguin-blue-3" x1="30" y1="20" x2="90" y2="98" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stop-color="rgb(110, 196, 240)"></stop>
+                  <stop offset="55%" stop-color="rgb(110, 196, 240)" stop-opacity="0.92"></stop>
+                  <stop offset="100%" stop-color="#4A90D9"></stop>
+                </linearGradient>
+              </defs>
+              <g filter="url(#flexi-blue-penguin-shadow-3)">
+                <path d="M 26 42 Q 26 22 60 20 Q 94 22 94 56 Q 96 90 60 98 Q 24 88 26 54 Z" fill="none" stroke="#ffffff" stroke-width="11.4" stroke-linejoin="round" stroke-linecap="round"></path>
+                <path d="M 26 42 Q 26 22 60 20 Q 94 22 94 56 Q 96 90 60 98 Q 24 88 26 54 Z" fill="url(#flexi-blue-penguin-blue-3)" stroke="#1a1a1a" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round"></path>
+                <ellipse cx="60" cy="64" rx="24" ry="28" fill="#FFFFFF" stroke="none"></ellipse>
+                <g fill="#F4A055" stroke="#1a1a1a" stroke-width="2.6" stroke-linejoin="round">
+                  <ellipse cx="46" cy="96" rx="10" ry="6"></ellipse>
+                  <ellipse cx="74" cy="96" rx="10" ry="6"></ellipse>
+                </g>
+                <g fill="url(#flexi-blue-penguin-blue-3)" stroke="#1a1a1a" stroke-width="2.6" stroke-linejoin="round">
+                  <ellipse cx="24" cy="74" rx="9" ry="11"></ellipse>
+                </g>
+                <g stroke="#1a1a1a" stroke-linejoin="round" stroke-linecap="round">
+                  <path d="M 18 68 L 34 62 Q 38 60 38 64 L 22 72 Z" fill="#FFF6E8" stroke-width="2.2"></path>
+                  <path d="M 18 68 L 34 74 Q 38 76 36 80 L 20 76 Z" fill="#FFF6E8" stroke-width="2.2"></path>
+                  <path d="M 20 70 L 22 76 L 24 70 Z" fill="#E6D9C6" stroke-width="1.8"></path>
+                  <path d="M 24 64 L 32 62 M 24 68 L 30 70" fill="none" stroke-width="1.2" opacity="0.5"></path>
+                </g>
+                <ellipse cx="38" cy="62" rx="7" ry="7" fill="#FF8FAB" opacity="0.85" stroke="none"></ellipse>
+                <ellipse cx="82" cy="62" rx="7" ry="7" fill="#FF8FAB" opacity="0.85" stroke="none"></ellipse>
+                <g stroke="#1a1a1a" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="44" cy="50" r="13" stroke-width="2.8" fill="rgba(255,255,255,0.35)"></circle>
+                  <circle cx="76" cy="50" r="13" stroke-width="2.8" fill="rgba(255,255,255,0.35)"></circle>
+                  <path d="M 57 50 L 63 50" stroke-width="2.8"></path>
+                  <path d="M 31 48 L 38 50" stroke-width="2.4"></path>
+                  <path d="M 89 48 L 82 50" stroke-width="2.4"></path>
+                </g>
+                <g class="flexi-blue-penguin-eyes">
+                  <circle cx="44" cy="52" r="4" fill="#1a1a1a" stroke="none"></circle>
+                  <circle cx="76" cy="52" r="4" fill="#1a1a1a" stroke="none"></circle>
+                </g>
+                <path d="M 60 58 L 56 66 L 64 66 Z" fill="#F4A055" stroke="#1a1a1a" stroke-width="2.4" stroke-linejoin="round"></path>
+                <path d="M 54 68 Q 60 72 66 68" fill="none" stroke="#1a1a1a" stroke-width="2" stroke-linecap="round"></path>
+                <g class="flexi-blue-penguin-tap" stroke="#1a1a1a" stroke-linejoin="round" stroke-linecap="round">
+                  <ellipse cx="92" cy="44" rx="9" ry="11" fill="url(#flexi-blue-penguin-blue-3)" stroke-width="2.6"></ellipse>
+                  <path d="M 88 36 L 84 22 L 87 21 L 91 35 Z" fill="#FFCA28" stroke-width="2.2"></path>
+                  <path d="M 84 22 L 83 18 L 86 17 L 87 21 Z" fill="#FF8FAB" stroke-width="1.8"></path>
+                  <path d="M 88 36 L 89 38 L 86 39 Z" fill="#5C5C5C" stroke-width="1.6"></path>
+                  <circle cx="60" cy="24" r="2.2" fill="#1a1a1a" opacity="0.25" stroke="none"></circle>
+                </g>
+              </g>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PERFORATED STAMP PAPER SECTION (Decluttered: Only Upcoming Tasks from Google Calendar) -->
+    <section class="dashboard-stamp-section">
+      <div class="framer-container">
+        <div class="stamp-paper-shadow-wrap">
+          <div class="stamp-paper-card">
+            <div class="upcoming-tasks-card">
+              <div class="upcoming-tasks-top">
+                <div class="upcoming-card-header-row">
+                  <div>
+                    <div class="services-pill">GOOGLE CALENDAR</div>
+                    <h2 class="upcoming-card-heading" data-scramble="UPCOMING TASKS">UPCOMING TASKS</h2>
+                  </div>
+                  <button class="mini-sync-btn" id="btnRefreshDashboard">
+                    &#x21bb; SYNC CALENDAR
+                  </button>
+                </div>
+
+                <div class="upcoming-card-meta">
+                  <span id="dashDateSubLabel">TODAY'S SAMPLE</span>
+                  <span id="todayEventsCountBadge">0 UPCOMING</span>
+                </div>
+
+                <div class="upcoming-tasks-list" id="todayGoogleEventsList">
+                  <!-- Populated from Google Calendar integration data by app.js -->
+                </div>
+              </div>
+
+              <div class="stack-card-citation" id="dashCalendarFooterLabel">
+                PULLED FROM GOOGLE CALENDAR INTEGRATION
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="framer-grid-footer"></footer>
+  </main>
+
+  <!-- =====================================================================
+       VIEW 3: FINAL APPROVAL SCREEN (`/approve/:batchId` or `/approve`)
+       Linked via Photon SMS when you prompt changes to the LLM
+       ===================================================================== -->
+  <main id="viewApprove" class="view-section hidden">
+    <div class="app-container">
+      <div class="hero-meta-bar dashboard-meta-bar">
+        <button class="back-link-inline" id="btnBackToDashboard">&larr; BACK TO DASHBOARD</button>
+        <span class="hero-meta-center">PHOTON SMS LINK &middot; FINAL APPROVAL</span>
+        <span class="hero-meta-right" id="approveBatchMetaId">BATCH REVIEW</span>
+      </div>
+
+      <div class="approval-hero-header">
+        <div>
+          <div class="services-pill">FINAL APPROVAL</div>
+          <h1 class="dash-giant-title" data-scramble="PROPOSED CHANGES">PROPOSED CHANGES</h1>
+        </div>
+
+        <div class="veyzl-audit-card" id="veyzlAuditBox">
+          <div class="audit-title">SAFETY AUDIT</div>
+          <div class="audit-pills-row">
+            <span class="audit-pill ok" id="auditConflictBadge">&check; CONFLICT-FREE</span>
+            <span class="audit-pill ok" id="auditBurnoutBadge">&check; BURNOUT-SAFE</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="batch-selector-bar" id="batchSelectorBar"></div>
+      <div id="approvalContentContainer" class="approval-content-container"></div>
+    </div>
+  </main>
+
+  <!-- Toast Notification -->
+  <div class="toast-banner hidden" id="appToast"></div>
+
+  <script type="module" src="/assets/app.js"></script>
+</body>
+</html>

@@ -5,7 +5,7 @@ import { demoCalendar } from "./calendar-api.ts";
 import { openWindows } from "./open-time.ts";
 import { addDays, localDate, parseCalendarTime, formatTime } from "./time.ts";
 
-const calendarId = "c_8a3f88a63add1862899e38c8eb168366805a752ed4bc3283303e5a68823964bf@group.calendar.google.com";
+const calendarId = process.env.GOOGLE_CALENDAR_ID || "c_8a3f88a63add1862899e38c8eb168366805a752ed4bc3283303e5a68823964bf@group.calendar.google.com";
 const tokenFile = new URL("../.google-calendar-token.json", import.meta.url);
 
 export function isUpcomingRequest(text: string): boolean {
@@ -14,7 +14,20 @@ export function isUpcomingRequest(text: string): boolean {
 }
 
 export async function getUpcomingCalendarReply(): Promise<string> {
-  const token = JSON.parse(await readFile(tokenFile, "utf8"));
+  let token;
+  try {
+    token = JSON.parse(await readFile(tokenFile, "utf8"));
+  } catch (e) {
+    if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN) {
+      token = {
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
+      };
+    } else {
+      throw e;
+    }
+  }
   const auth = new google.auth.OAuth2(token.client_id, token.client_secret);
   auth.setCredentials({ refresh_token: token.refresh_token });
 

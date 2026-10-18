@@ -859,6 +859,9 @@ def stage_proposal_batch(
         requires_human_approval=True,
     )
 
+    frontend_base = os.getenv("FRONTEND_URL", f"http://localhost:{os.getenv('PORT', '3000')}").rstrip("/")
+    approval_url = f"{frontend_base}/approve/{batch_id}"
+
     staged = StagedChangeProposal(
         proposal_id=proposal_id,
         batch_id=batch_id,
@@ -868,6 +871,7 @@ def stage_proposal_batch(
         operations=diffs,
         veyzl_audit=audit,
         status="pending",
+        approval_url=approval_url,
     )
     state.pending_proposals.append(staged)
     return staged

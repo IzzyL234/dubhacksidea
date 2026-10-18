@@ -411,6 +411,8 @@ async def propose_calendar_changes(payload: ProposeCalendarRequest):
         "batch_id": staged.batch_id,
         "proposal_id": staged.proposal_id,
         "summary_message": staged.summary_message,
+        "reply_text": f"{staged.summary_message}\n\nReview & approve all changes here:\n{staged.approval_url}",
+        "approval_url": staged.approval_url,
         "veyzl_audit": staged.veyzl_audit.model_dump(),
         "operations_count": len(staged.operations),
         "proposal": staged.model_dump(),
@@ -434,6 +436,20 @@ async def get_pending_calendar_proposals(
         "count": len(items),
         "proposals": [p.model_dump() for p in items],
     }
+
+
+@app.get("/api/calendar/proposals/{batch_id}", tags=["Staged Approval Queue (Git Diff for Calendar)"])
+async def get_calendar_proposal_by_id(batch_id: str):
+    """
+    Returns a specific `StagedChangeProposal` batch by `batch_id` or `proposal_id` for the Final Approval Screen.
+    """
+    target = next(
+        (p for p in engine.state.pending_proposals if p.batch_id == batch_id or p.proposal_id == batch_id),
+        None,
+    )
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"Proposal batch '{batch_id}' not found")
+    return {"proposal": target.model_dump()}
 
 
 @app.post("/api/calendar/proposals/{batch_id}/approve", tags=["Staged Approval Queue (Git Diff for Calendar)"])
@@ -600,6 +616,148 @@ async def set_demo_stage(payload: DemoStageRequest):
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# =====================================================================
+# Google OAuth & Daily Supplement Snapshot + Static Frontend Routes
+# =====================================================================
+
+@app.get("/api/auth/status", tags=["Google OAuth & Calendar Integration"])
+async def get_auth_status():
+    token_path = BACKEND_DIR.parent / ".google-calendar-token.json"
+    has_token_file = token_path.exists()
+    cal_id = os.getenv("GOOGLE_CALENDAR_ID", "c_8a3f88a63add1862899e38c8eb168366805a752ed4bc3283303e5a68823964bf@group.calendar.google.com")
+    return {
+        "authenticated": True,
+        "provider": "google_oauth",
+        "calendar_id": cal_id,
+        "has_token_file": has_token_file,
+        "user": {
+            "name": "UW Student (Hackathon Demo)",
+            "email": "student@uw.edu",
+            "calendar_name": "Hackathon Demo Calendar",
+        },
+    }
+
+
+@app.post("/api/auth/google/connect", tags=["Google OAuth & Calendar Integration"])
+async def connect_google_account():
+    if not engine.state.events and not engine.state.blocks:
+        engine.apply_demo_stage("day_21_optimized")
+    cal_id = os.getenv("GOOGLE_CALENDAR_ID", "c_8a3f88a63add1862899e38c8eb168366805a752ed4bc3283303e5a68823964bf@group.calendar.google.com")
+    return {
+        "status": "connected",
+        "authenticated": True,
+        "calendar_id": cal_id,
+        "user": {
+            "name": "UW Student (Hackathon Demo)",
+            "email": "student@uw.edu",
+            "calendar_name": "Hackathon Demo Calendar",
+        },
+        "redirect_to": "/dashboard",
+    }
+
+
+@app.get("/api/google-calendar/today", tags=["Google OAuth & Calendar Integration"])
+async def get_google_calendar_today():
+    cal_id = os.getenv("GOOGLE_CALENDAR_ID", "c_8a3f88a63add1862899e38c8eb168366805a752ed4bc3283303e5a68823964bf@group.calendar.google.com")
+    events_sample = [
+        {
+            "id": e.id,
+            "title": e.title,
+            "start_time": e.start_time,
+            "end_time": e.end_time,
+            "source": "google_calendar_synced",
+        }
+        for e in engine.state.events
+    ]
+    blocks_sample = [
+        {
+            "id": b.id,
+            "title": b.title,
+            "start_time": b.start_time,
+            "end_time": b.end_time,
+            "recommended_location": b.recommended_location,
+            "source": "google_calendar_synced",
+        }
+        for b in engine.state.blocks
+    ]
+    if not events_sample and not blocks_sample:
+        events_sample = [
+            {
+                "id": "gcal_1",
+                "title": "Math lecture",
+                "start_time": "2026-10-19T09:00:00+00:00",
+                "end_time": "2026-10-19T10:00:00+00:00",
+                "source": "google_calendar_demo",
+            },
+            {
+                "id": "gcal_2",
+                "title": "CS lecture",
+                "start_time": "2026-10-19T11:00:00+00:00",
+                "end_time": "2026-10-19T12:00:00+00:00",
+                "source": "google_calendar_demo",
+            },
+            {
+                "id": "gcal_3",
+                "title": "Lunch",
+                "start_time": "2026-10-19T12:00:00+00:00",
+                "end_time": "2026-10-19T12:45:00+00:00",
+                "source": "google_calendar_demo",
+            },
+            {
+                "id": "gcal_4",
+                "title": "Campus club",
+                "start_time": "2026-10-19T15:00:00+00:00",
+                "end_time": "2026-10-19T16:00:00+00:00",
+                "source": "google_calendar_demo",
+            },
+            {
+                "id": "gcal_5",
+                "title": "Dinner",
+                "start_time": "2026-10-19T18:00:00+00:00",
+                "end_time": "2026-10-19T18:45:00+00:00",
+                "source": "google_calendar_demo",
+            },
+        ]
+    combined = sorted(
+        events_sample + blocks_sample,
+        key=lambda item: item.get("start_time") or "",
+    )[:8]
+    return {
+        "calendar_id": cal_id,
+        "authenticated": True,
+        "user": {
+            "name": "UW Student (Hackathon Demo)",
+            "email": "student@uw.edu",
+            "calendar_name": "Hackathon Demo · Google Calendar",
+        },
+        "upcoming_tasks": combined,
+        "today_events_sample": combined[:6],
+    }
+
+
+try:
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    FRONTEND_DIR = BACKEND_DIR.parent / "frontend"
+    if FRONTEND_DIR.exists():
+        app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR)), name="frontend_assets")
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/dashboard", include_in_schema=False)
+    @app.get("/customize", include_in_schema=False)
+    @app.get("/calendar", include_in_schema=False)
+    @app.get("/approve", include_in_schema=False)
+    @app.get("/approve/{batch_id}", include_in_schema=False)
+    async def serve_spa(batch_id: Optional[str] = None):
+        index_file = FRONTEND_DIR / "index.html"
+        if index_file.exists():
+            return FileResponse(str(index_file))
+        return {"message": "Daywise Frontend is starting..."}
+except Exception as e:
+    logger.info("Frontend static routes not mounted: %s", e)
 
 
 if __name__ == "__main__":

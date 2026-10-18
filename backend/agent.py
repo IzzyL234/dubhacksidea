@@ -545,6 +545,7 @@ class PhotonAgentRouter:
                 )
 
             parts = list(event_summaries) + split_phrases
+            link_suffix = f" Review & approve: {staged.approval_url}" if (staged and staged.approval_url) else ""
             if parts:
                 if len(parts) >= 2:
                     joined = ", ".join(parts[:-1]) + f", and {parts[-1]}"
@@ -552,10 +553,10 @@ class PhotonAgentRouter:
                     joined = parts[0]
                 reply_text = (
                     f"Boom—I just added your {joined}. "
-                    f"Staged in Pending Changes ({staged.batch_id if staged else 'ready'})—reply YES to confirm or check your calendar!"
+                    f"Staged in Pending Changes ({staged.batch_id if staged else 'ready'})—reply YES to confirm or check your calendar!{link_suffix}"
                 )
             else:
-                reply_text = proposal_batch.summary_message
+                reply_text = f"{proposal_batch.summary_message}{link_suffix}"
 
             sparsity = check_calendar_sparsity(self.state.events, self.state.blocks, self.rhythm_learner.rhythm)
             return IncomingMessageResponse(

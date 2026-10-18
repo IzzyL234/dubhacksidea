@@ -6,6 +6,7 @@
   "scripts": {
     "start": "bun src/index.ts",
     "dev": "bun --watch src/index.ts",
+    "web": "node --experimental-transform-types --env-file-if-exists=.env src/web-server.ts",
     "backend": "python3 -m backend.main",
     "photon": "node --experimental-transform-types --env-file-if-exists=.env bridge/photon.mjs",
     "test": "python3 -m unittest test_backend.py",

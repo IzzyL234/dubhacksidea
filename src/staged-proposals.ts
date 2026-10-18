@@ -52,13 +52,15 @@ export interface CalendarProposalBatch {
 }
 
 export interface ProposedOperationDiff {
-  operation_id: string;
-  operation_type: ProposalOperationType;
+  operation_id?: string;
+  proposal_id?: string;
+  operation_type?: ProposalOperationType;
+  op_type?: ProposalOperationType;
   reasoning: string;
   before_state: Record<string, unknown> | null;
   after_state: Record<string, unknown> | null;
-  predicted_reward: number | null;
-  uncertainty_bound: number | null;
+  predicted_reward?: number | null;
+  uncertainty_bound?: number | null;
   has_conflict: boolean;
   conflict_with: string | null;
   exceeds_daily_cap: boolean;
@@ -80,6 +82,7 @@ export interface StagedChangeProposal {
   operations: ProposedOperationDiff[];
   veyzl_audit: VeyzlAudit;
   status: "pending" | "approved" | "rejected" | "modified";
+  approval_url?: string | null;
 }
 
 export const CALENDAR_PROPOSAL_BATCH_SCHEMA = {
@@ -399,6 +402,8 @@ export function validateAndStageBatch(
     });
   }
 
+  const frontendBase = (process.env.FRONTEND_URL ?? `http://localhost:${process.env.PORT ?? "3000"}`).replace(/\/+$/, "");
+
   return {
     proposal_id: proposalId,
     batch_id: batchId,
@@ -412,20 +417,24 @@ export function validateAndStageBatch(
       requires_human_approval: true,
     },
     status: "pending",
+    approval_url: `${frontendBase}/approve/${batchId}`,
   };
 }
 
 export class StagedProposalEngine {
   private backendUrl: string;
+  private frontendUrl: string;
   private storagePath: string;
 
   constructor(
     private gateway: CalendarGateway,
     storagePath = fileURLToPath(new URL("../data/staged-proposals.json", import.meta.url)),
-    backendUrl = process.env.BACKEND_URL ?? "http://127.0.0.1:8000"
+    backendUrl = process.env.BACKEND_URL ?? "http://127.0.0.1:8000",
+    frontendUrl = process.env.FRONTEND_URL ?? `http://localhost:${process.env.PORT ?? "3000"}`
   ) {
     this.storagePath = storagePath;
     this.backendUrl = backendUrl;
+    this.frontendUrl = frontendUrl.replace(/\/+$/, "");
   }
 
   private async loadLocal(): Promise<StagedChangeProposal[]> {
@@ -475,12 +484,18 @@ export class StagedProposalEngine {
       });
       if (resp.ok) {
         const data = (await resp.json()) as {
-          reply_text: string;
+          reply_text?: string;
+          summary_message?: string;
+          approval_url?: string;
           proposal: StagedChangeProposal;
         };
+        if (!data.proposal.approval_url) {
+          data.proposal.approval_url = data.approval_url ?? `${this.frontendUrl}/approve/${data.proposal.batch_id}`;
+        }
         const existing = await this.loadLocal();
         await this.saveLocal([...existing.filter(p => p.batch_id !== data.proposal.batch_id), data.proposal]);
-        return { replyText: data.reply_text, proposal: data.proposal };
+        const replyText = this.formatProposalPreview(data.proposal);
+        return { replyText, proposal: data.proposal };
       }
     } catch {
       // Fall through to local TS LLM proposal synthesis if FastAPI backend is offline
@@ -526,36 +541,46 @@ Generate a structured CalendarProposalBatch for the user's request. Use ISO-8601
 
   formatProposalPreview(proposal: StagedChangeProposal): string {
     const lines = proposal.operations.map((op, idx) => {
+      const opType = op.operation_type ?? op.op_type ?? "CREATE_EVENT";
       const warn = op.has_conflict
         ? ` [CONFLICT with ${op.conflict_with}]`
         : op.exceeds_daily_cap
           ? " [Burnout cap warning]"
           : "";
-      if (op.operation_type === "CREATE_EVENT" && op.after_state) {
-        const reward = op.predicted_reward ? ` (${op.predicted_reward.toFixed(1)}★)` : "";
-        return `${idx + 1}. + CREATE "${op.after_state.title}" (${op.after_state.start_time} -> ${op.after_state.end_time}) @ ${op.after_state.location}${reward}${warn}`;
+      if (opType === "CREATE_EVENT" && op.after_state) {
+        const rewardVal = op.predicted_reward ?? (typeof op.after_state.predicted_reward === "number" ? op.after_state.predicted_reward : null);
+        const reward = rewardVal ? ` (${rewardVal.toFixed(1)}★)` : "";
+        const loc = op.after_state.location ?? op.after_state.recommended_location ?? "desk";
+        return `${idx + 1}. + CREATE "${op.after_state.title}" (${op.after_state.start_time} -> ${op.after_state.end_time}) @ ${loc}${reward}${warn}`;
       }
-      if (op.operation_type === "UPDATE_EVENT" && op.after_state) {
+      if (opType === "UPDATE_EVENT" && op.after_state) {
         return `${idx + 1}. ~ MOVE/UPDATE "${op.after_state.title}" -> ${op.after_state.start_time}${warn}`;
       }
-      if (op.operation_type === "SPLIT_OR_RESCHEDULE_BLOCK" && op.after_state) {
-        const chunks = Array.isArray(op.after_state.chunks) ? op.after_state.chunks.length : 0;
-        return `${idx + 1}. % SPLIT block ${op.after_state.target_block_id} into ${chunks} chunk(s)${warn}`;
+      if (opType === "SPLIT_OR_RESCHEDULE_BLOCK" && op.after_state) {
+        const chunkList = Array.isArray(op.after_state.chunks)
+          ? op.after_state.chunks
+          : Array.isArray(op.after_state.proposed_chunks)
+            ? op.after_state.proposed_chunks
+            : [];
+        return `${idx + 1}. % SPLIT block ${op.after_state.target_block_id} into ${chunkList.length} chunk(s)${warn}`;
       }
-      if (op.operation_type === "DELETE_EVENT") {
+      if (opType === "DELETE_EVENT") {
         return `${idx + 1}. - DELETE "${op.before_state?.title ?? op.before_state?.id ?? "event"}"`;
       }
-      if (op.operation_type === "UPDATE_DEADLINE" && op.after_state) {
-        return `${idx + 1}. ! DEADLINE "${op.after_state.assignment_id_or_title}" -> ${op.after_state.new_due_date}`;
+      if (opType === "UPDATE_DEADLINE" && op.after_state) {
+        return `${idx + 1}. ! DEADLINE "${op.after_state.assignment_id_or_title ?? op.after_state.title}" -> ${op.after_state.new_due_date ?? op.after_state.due_date}`;
       }
-      return `${idx + 1}. ${op.operation_type}: ${op.reasoning}`;
+      return `${idx + 1}. ${opType}: ${op.reasoning}`;
     });
+
+    const approvalUrl = proposal.approval_url || `${this.frontendUrl}/approve/${proposal.batch_id}`;
 
     return (
       `${proposal.summary_message}\n\n` +
       `Staged Calendar Diff (${proposal.batch_id}):\n` +
       `${lines.join("\n")}\n\n` +
-      `Reply YES to lock this in, or NO to discard.`
+      `Review & approve all changes here:\n${approvalUrl}\n` +
+      `(Or reply YES to lock this in, NO to discard.)`
     );
   }
 
@@ -598,20 +623,22 @@ Generate a structured CalendarProposalBatch for the user's request. Use ISO-8601
     // 2. Write approved operations to Google Calendar (`src/calendar-api.ts`) when credentials exist
     let gcalSynced = 0;
     for (const op of target.operations) {
+      const opId = op.operation_id ?? op.proposal_id ?? "op";
+      const opType = op.operation_type ?? op.op_type ?? "CREATE_EVENT";
       if (
         proposalIds?.length &&
-        !proposalIds.includes(op.operation_id) &&
+        !proposalIds.includes(opId) &&
         !proposalIds.includes(target.proposal_id)
       ) {
         continue;
       }
       try {
-        if (op.operation_type === "CREATE_EVENT" && op.after_state) {
+        if (opType === "CREATE_EVENT" && op.after_state) {
           const startIso = String(op.after_state.start_time ?? "");
           const endIso = String(op.after_state.end_time ?? "");
           if (startIso && endIso) {
             const key = createHash("sha256")
-              .update(`${target.batch_id}:${op.operation_id}`)
+              .update(`${target.batch_id}:${opId}`)
               .digest("hex");
             const eventInput: EventInput = {
               id: `staged${key.slice(0, 36)}`,
