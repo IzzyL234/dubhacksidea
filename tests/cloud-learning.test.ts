@@ -36,6 +36,14 @@ test('cloud outage reports local-only prediction rather than claiming cloud hist
  const d=await root();const s=new StudySessions(join(d,'sessions'),null,join(d,'feedback'),undefined,undefined,{load:async()=>{throw Error('offline');}});await ready(s);
  expect(await s.handle('private-chat','study score','score')).toContain('Cloud history unavailable');
 });
+
+test('cached cloud observations survive an outage without losing partial-session learning',async()=>{
+ const d=await root();let offline=false;const partial=pair();partial.session_record.location=null;partial.session_record.study_space=null;partial.session_record.environment={};
+ const source={load:async()=>{if(offline)throw Error('offline');return [partial];}};
+ const make=()=>new StudySessions(join(d,'sessions'),null,join(d,'feedback'),'unused',undefined,source);
+ await ready(make());const before=await make().proactiveOptions('private-chat','library',60);expect(before.observations).toBe(1);expect(before.partialObservations).toBe(1);
+ offline=true;const after=await make().proactiveOptions('private-chat','library',60);expect(after.observations).toBe(1);expect(after.cloudUnavailable).toBe(true);expect(after.partialObservations).toBe(1);
+});
 test('history GET is user-filtered and backend credentials never enter the URL',async()=>{
  let url='',init:RequestInit|undefined;const store=new SupabaseLearningStore('https://example.supabase.co','sb_secret_test',async(u,o)=>{url=String(u);init=o;return new Response(JSON.stringify([pair()]));});
  expect(await store.load(user)).toHaveLength(1);expect(url).toContain('eq.'+user);expect(url).not.toContain('sb_secret');expect(init?.method).toBeUndefined();
