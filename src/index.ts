@@ -1,3 +1,4 @@
+import {configuredDashboardAccess} from "./dashboard-access.ts";
 import {photoAttachment} from "./photo-input.ts";
 import {acquireInstance,AlreadyRunning} from "./single-instance.ts";
 import {fileURLToPath as instanceFilePath} from "node:url";
@@ -28,6 +29,8 @@ if(textProvider()==="xai"&&!process.env.XAI_API_KEY)throw Error("Configure XAI_A
 if(textProvider()==="gemini"&&!process.env.GEMINI_API_KEY)throw Error("Configure GEMINI_API_KEY");
 
 try{const release=acquireInstance(instanceFilePath(new URL("../data/runtime/bot-instance.json",import.meta.url)));process.once("exit",release);}catch(error){if(error instanceof AlreadyRunning){console.log(error.message);process.exit(0);}throw error;}
+
+const dashboardAccess = configuredDashboardAccess();
 
 const app = await Spectrum({
   projectId:
@@ -193,6 +196,9 @@ for await (const [space, envelope] of app.messages) {
   if (!incoming) continue;
 
   try {
+    if (/^(?:dashboard code|connect dashboard|disconnect dashboard)[.!?]*$/i.test(incoming)) {
+      await space.send(dashboardAccess ? (await dashboardAccess.handle(space.id,incoming,message.id))! : "Dashboard connection is not configured yet."); continue;
+    }
     if(incoming.toLowerCase()==="smart prompts on"){
       const connected=await reminders.handle(space.id,"reminders on",message.id+":connect");
       if(!await reminders.enabledFor(space.id)){await space.send(connected??"Could not connect reminders.");continue;}
