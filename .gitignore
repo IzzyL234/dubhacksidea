@@ -32,3 +32,5 @@ data/user_models/
 
 data/photos_log.json
 data/sessions_history.jsonl
+
+data/departures/

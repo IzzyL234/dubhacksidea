@@ -264,6 +264,9 @@ export class SmartPrompts {
       return {allow:true,reason:decision.reason,plannedMinutes:minutes,message:`${presence.confirmed===false?(presence.place.name?"Your fresh location readings suggest you are staying near a detected building":"Your fresh location readings suggest you have stayed in one area"):"You have stayed near your saved "+presence.place.label.replaceAll("_"," ")+" spot"} and your demo calendar has ${freeMinutes} free minutes.${basis} Want to start up to a ${minutes}-minute study session and add it to Hackathon Demo? Reply yes or skip.`};
     });
   }
+  async departureLocation(conversation:string):Promise<LocationSnapshot|null>{
+    const key=keyFor(conversation);return this.locked(key,async()=>{const state=await this.read(key);return state.enabled&&state.address?await this.deps.read(state.address):null;});
+  }
   async refreshPresence(conversation:string):Promise<void>{
     if(!this.deps.eventDriven)return;const key=keyFor(conversation);await this.locked(key,async()=>{const state=await this.read(key);if(!state.enabled)return;await this.coordinatorPresence(key,state);await this.save(key,state);});
   }

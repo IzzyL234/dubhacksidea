@@ -153,6 +153,9 @@ export class StudySessions {
       return {sessionStatus:session?.status??"none",feedbackRecorded:Boolean(session?.feedback_id)};
     });
   }
+  async departureSession(conversation:string):Promise<{id:string;startedAt:string}|null>{
+    const key=hash(conversation);return this.serialized(key,async()=>{const session=(await this.read(key)).sessions.find(s=>s.status==="active");return session?{id:session.id,startedAt:session.started_at}:null;});
+  }
   async hasUnfinished(conversation: string): Promise<boolean> {
     const key=hash(conversation);
     return this.serialized(key,async()=> (await this.read(key)).sessions.some(s=>s.status==="active"||s.status==="awaiting_feedback"));
