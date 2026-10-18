@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="240" height="240" class="daily-asset-wrap daily-asset-float" aria-label="Blue penguin with glasses holding a book and pencil" role="img">
+                <style>.daily-asset-eyes{transform-origin:60px 52px;animation:none}@keyframes blink{0%,44%,48%,100%{transform:scaleY(1)}46%{transform:scaleY(.1)}}@media(prefers-reduced-motion:reduce){*{animation:none!important}}</style><defs>
+                  <filter id="daily-asset-shadow-1" x="-35%" y="-35%" width="170%" height="170%">
+                    <feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#000" flood-opacity="0.18"></feDropShadow>
+                  </filter>
+                  <linearGradient id="daily-asset-blue-1" x1="30" y1="20" x2="90" y2="98" gradientUnits="userSpaceOnUse">
+                    <stop offset="0%" stop-color="rgb(110, 196, 240)"></stop>
+                    <stop offset="55%" stop-color="rgb(110, 196, 240)" stop-opacity="0.92"></stop>
+                    <stop offset="100%" stop-color="#4A90D9"></stop>
+                  </linearGradient>
+                </defs>
+                <g filter="url(#daily-asset-shadow-1)">
+                  <path d="M 26 42 Q 26 22 60 20 Q 94 22 94 56 Q 96 90 60 98 Q 24 88 26 54 Z" fill="none" stroke="#ffffff" stroke-width="11.4" stroke-linejoin="round" stroke-linecap="round"></path>
+                  <path d="M 26 42 Q 26 22 60 20 Q 94 22 94 56 Q 96 90 60 98 Q 24 88 26 54 Z" fill="url(#daily-asset-blue-1)" stroke="#1a1a1a" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round"></path>
+                  <ellipse cx="60" cy="64" rx="24" ry="28" fill="#FFFFFF" stroke="none"></ellipse>
+                  <g stroke="#1a1a1a" stroke-linejoin="round" stroke-linecap="round">
+                    <path d="M 60 88 L 40 76 Q 36 72 40 68 L 58 72 Z" fill="#FFF6E8" stroke-width="2.2"></path>
+                    <path d="M 60 88 L 80 76 Q 84 72 80 68 L 62 72 Z" fill="#FFF6E8" stroke-width="2.2"></path>
+                    <path d="M 58 88 L 60 70 L 62 88 Z" fill="#E6D9C6" stroke-width="2"></path>
+                    <path d="M 46 73 L 56 77 M 46 76 L 54 79" fill="none" stroke-width="1.4" opacity="0.55"></path>
+                    <path d="M 74 73 L 64 77 M 74 76 L 66 79" fill="none" stroke-width="1.4" opacity="0.55"></path>
+                  </g>
+                  <g stroke="#1a1a1a" stroke-linejoin="round" stroke-linecap="round">
+                    <path d="M 94 78 L 104 58 L 108 60 L 98 80 Z" fill="#FFCA28" stroke-width="2.2"></path>
+                    <path d="M 104 58 L 106 52 L 110 54 L 108 60 Z" fill="#FF8FAB" stroke-width="2"></path>
+                    <path d="M 94 78 L 92 82 L 96 83 Z" fill="#5C5C5C" stroke-width="1.8"></path>
+                  </g>
+                  <g fill="url(#daily-asset-blue-1)" stroke="#1a1a1a" stroke-width="2.6" stroke-linejoin="round">
+                    <ellipse cx="26" cy="76" rx="9" ry="11"></ellipse>
+                    <ellipse cx="94" cy="76" rx="9" ry="11"></ellipse>
+                  </g>
+                  <ellipse cx="38" cy="62" rx="7" ry="7" fill="#FF8FAB" opacity="0.85" stroke="none"></ellipse>
+                  <ellipse cx="82" cy="62" rx="7" ry="7" fill="#FF8FAB" opacity="0.85" stroke="none"></ellipse>
+                  <g stroke="#1a1a1a" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="44" cy="50" r="13" stroke-width="2.8" fill="rgba(255,255,255,0.35)"></circle>
+                    <circle cx="76" cy="50" r="13" stroke-width="2.8" fill="rgba(255,255,255,0.35)"></circle>
+                    <path d="M 57 50 L 63 50" stroke-width="2.8"></path>
+                    <path d="M 31 48 L 38 50" stroke-width="2.4"></path>
+                    <path d="M 89 48 L 82 50" stroke-width="2.4"></path>
+                  </g>
+                  <g class="daily-asset-eyes">
+                    <circle cx="44" cy="52" r="4" fill="#1a1a1a" stroke="none"></circle>
+                    <circle cx="76" cy="52" r="4" fill="#1a1a1a" stroke="none"></circle>
+                  </g>
+                  <path d="M 60 58 L 56 66 L 64 66 Z" fill="#F4A055" stroke="#1a1a1a" stroke-width="2.4" stroke-linejoin="round"></path>
+                  <path d="M 54 68 Q 60 72 66 68" fill="none" stroke="#1a1a1a" stroke-width="2" stroke-linecap="round"></path>
+                  <g fill="#F4A055" stroke="#1a1a1a" stroke-width="2.6" stroke-linejoin="round">
+                    <ellipse cx="46" cy="96" rx="10" ry="6"></ellipse>
+                    <ellipse cx="74" cy="96" rx="10" ry="6"></ellipse>
+                  </g>
+                </g>
+              </svg>

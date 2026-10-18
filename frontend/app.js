@@ -64,9 +64,11 @@ function showToast(msg) {
 // =====================================================================
 const CIPHER_CHARS = "+/F25Y9CXJ%=@&5L?0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
+const motionIsReduced=()=>document.body.classList.contains("daily-calm")||window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 function runScramble(element) {
   if (!element || element._scrambleRunning) return;
   const original = element.getAttribute("data-scramble") || element.innerText.trim();
+  if(motionIsReduced()){element.innerText=original;return;}
   element._scrambleRunning = true;
   let frame = 0;
   const totalFrames = 26;
@@ -276,6 +278,7 @@ function initStretchType() {
       return;
     }
 
+    if(motionIsReduced()||state.currentView!=="home"){layout.letterNodes.forEach(node=>node.removeAttribute("transform"));if(coordLabel)coordLabel.style.opacity="0";requestAnimationFrame(frameLoop);return;}
     const rect = root.getBoundingClientRect();
     const scale = root.offsetWidth ? rect.width / root.offsetWidth || 1 : 1;
     const localX = (pointer.x - rect.left) / scale;
@@ -341,6 +344,7 @@ function setView(viewName, options = {}) {
     dashboard: document.getElementById("viewDashboard"),
     getStarted: document.getElementById("viewGetStarted"),
     insights: document.getElementById("viewInsights"),
+    howItWorks: document.getElementById("viewHowItWorks"),
     approve: document.getElementById("viewApprove"),
   };
 
@@ -357,10 +361,12 @@ function setView(viewName, options = {}) {
 
   const tabHome = document.getElementById("tabHome");
   const tabDashboard = document.getElementById("tabDashboard");
-  [tabHome, tabDashboard, document.getElementById("tabGetStarted"), document.getElementById("tabInsights")].forEach(btn => btn?.classList.remove("active-navy"));
+  [tabHome, tabDashboard, document.getElementById("tabGetStarted"), document.getElementById("tabInsights"), document.getElementById("tabHowItWorks")].forEach(btn => btn?.classList.remove("active-navy"));
 
   if (viewName === "home") {
     tabHome?.classList.add("active-navy");
+  } else if(viewName === "howItWorks") {
+    document.getElementById("tabHowItWorks")?.classList.add("active-navy");
   } else if (viewName === "insights" || viewName === "getStarted") {
     document.getElementById(viewName === "insights" ? "tabInsights" : "tabGetStarted")?.classList.add("active-navy");
   } else {
@@ -371,6 +377,7 @@ function setView(viewName, options = {}) {
     let targetUrl = "/";
     if (viewName === "dashboard") targetUrl = "/dashboard";
     else if (viewName === "insights") targetUrl = "/insights";
+    else if(viewName === "howItWorks") targetUrl = "/how-it-works";
     else if (viewName === "getStarted") targetUrl = "/about";
     else if (viewName === "approve") {
       targetUrl = state.activeBatchId ? `/approve/${encodeURIComponent(state.activeBatchId)}` : "/approve";
@@ -405,7 +412,9 @@ function handleInitialRoute() {
     showToast("Connected to Google Calendar via OAuth 2.0!");
   }
 
-  if (path === "/insights") {
+  if(path === "/how-it-works") {
+    setView("howItWorks", {skipHistory:true});
+  } else if (path === "/insights") {
     setView("insights", {skipHistory:true});
   } else if (path === "/about") {
     setView("getStarted", {skipHistory:true});
@@ -851,6 +860,7 @@ function setupEventListeners() {
   document.getElementById("tabDashboard")?.addEventListener("click", () => setView("dashboard"));
   document.getElementById("tabGetStarted")?.addEventListener("click", () => setView("getStarted"));
   document.getElementById("tabInsights")?.addEventListener("click", () => setView("insights"));
+  document.getElementById("tabHowItWorks")?.addEventListener("click", () => setView("howItWorks"));
 
   document.getElementById("navPendingPill")?.addEventListener("click", () => {
     const latest = state.pendingProposals[state.pendingProposals.length - 1];

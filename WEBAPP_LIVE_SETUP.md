@@ -48,3 +48,17 @@ During studying, fresh stable location evidence can attach a known category. If 
 Bot tests cover private dashboard ownership, location fallback, model consistency, daily report rollover, conflict approval and replay protection, and unavailable/empty live calendars. The web app and bot both build with Bun. Main and the teammate's `webapp` branch are unchanged.
 
 The teammate's existing `/approve/:batchId` planner screen remains available. New private conflict reviews use their own authenticated page and do not execute through that legacy screen.
+
+## Interactive website and Vercel
+
+The **How it works** tab at `/how-it-works` includes a downloadable SVG architecture graphic and four interactive explanation steps. The floating **Daily** mascot has a private-history summary, copyable bot command, 15/25/45-minute browser focus timer, nickname, preferred tone, and reduced-motion setting. Nickname/tone settings stay in local browser storage; they do not change the model or send data to the server. The timer does not create a tracked session. Use the bot to start, finish, and rate sessions.
+
+`vercel.json` hosts only `frontend/` and `api/index.ts`. The hosted API proxies the existing private Supabase dashboard endpoint, with no database service key or Google OAuth tokens. Shared local calendar, OAuth, and legacy demo-write routes are deliberately unavailable publicly. Connect your private dashboard code to see that chat's synced calendar and model.
+
+For a permanent deployment, import this repository into Vercel using **Other** as the framework, repository root, and this feature branch for a preview. The supplied configuration sets the output directory to `frontend`. The CLI equivalent is `bunx vercel deploy` after signing in. An unsigned-in temporary preview can be created with `bunx vercel deploy --temporary --yes` after publishing approval; keep its claim link private and claim it in your Vercel account. No deployment has been created by preparing these files.
+
+Phone calendar reviews also need the existing bot/review state on an always-running host. Run `bun src/review-worker.ts` beside the bot with the same `SCHEDULE_REVIEW_DIRECTORY` and Google token files, behind an HTTPS reverse proxy. The worker defaults to loopback port 3003 and exposes only the capability-protected review API. Set **REVIEW_BACKEND_URL** in Vercel to its HTTPS origin, and set **FRONTEND_URL** for the bot to the Vercel website origin. Do not publicly expose the full development web server. The messaging loop and file-based approval state cannot be moved into an ordinary short-lived Vercel function unchanged. If the review backend is absent, the hosted page explains that approval is unavailable and the bot-chat commands remain usable.
+
+`.vercelignore` allowlists website assets, the small hosted API and its shared pure helpers, package metadata, and synthetic starter data. It excludes private runtime state, `.env`, Google credentials/tokens, photos, and personal study records. Keep those exclusions when deploying from a populated checkout.
+
+UI references reviewed: [Motion](https://github.com/motiondivision/motion) and [Floating UI](https://github.com/floating-ui/floating-ui), both MIT-licensed. The companion uses the project's existing penguin SVG, native CSS animation and standard browser APIs; no third-party UI code or new animation dependencies were copied. Native behavior keeps this small vanilla-JavaScript site lightweight. Reduced-motion preferences are respected.

@@ -983,6 +983,7 @@ export async function handleWebRequest(req: IncomingMessage, res: ServerResponse
       pathname === "/dashboard" ||
       pathname === "/about" ||
       pathname === "/insights" ||
+      pathname === "/how-it-works" ||
       pathname === "/customize" ||
       pathname === "/calendar" ||
       pathname === "/approve" ||

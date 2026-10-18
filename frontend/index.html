@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/assets/styles.css" />
-  <link rel="stylesheet" href="/assets/learning.css" />
+  <link rel="stylesheet" href="/assets/learning.css" /><link rel="stylesheet" href="/assets/companion.css" />
 </head>
 <body>
   <!-- =====================================================================
@@ -37,6 +37,7 @@
       </button>
       <button class="nav-tab" data-view="getStarted" id="tabGetStarted"><span class="nav-tab-label">GET STARTED</span></button>
       <button class="nav-tab" data-view="insights" id="tabInsights"><span class="nav-tab-label">INSIGHTS</span></button>
+      <button class="nav-tab" data-view="howItWorks" id="tabHowItWorks"><span class="nav-tab-label">HOW IT WORKS</span></button>
     </nav>
   </header>
 
@@ -425,10 +426,33 @@
   <main id="viewGetStarted" class="view-section hidden"><section class="learning-section"><h2>Just send a text.</h2><div class="onboarding-split"><div class="learning-places" id="learningPlaces"></div><div><h3>Your study companion</h3><ol class="learning-steps"><li><strong>Start studying.</strong> Text “start studying” and send a workspace photo.</li><li><strong>Make it yours.</strong> The agent tries location matching first. If it cannot identify the place, it asks at the end.</li><li><strong>Check in.</strong> Text “done”, then rate productivity, mood, and distractions from 1 to 5.</li><li><strong>See what works.</strong> Connect your private dashboard code to explore scores, decisions, and insights.</li></ol><a href="/dashboard">Connect on Dashboard →</a></div></div></section></main>
   <main id="viewInsights" class="view-section hidden"><section class="learning-section"><h2>What your history tells us.</h2><p data-learning-status role="status">Connect on Dashboard to see your private history.</p><p><a href="/dashboard">← Dashboard</a></p><div id="learningInsights"></div></section></main>
 
+
+  <main id="viewHowItWorks" class="view-section hidden">
+    <section class="how-section">
+      <div class="how-eyebrow"><span class="how-dot"></span> A LITTLE CONTEXT. A BETTER DAY.</div>
+      <div class="how-heading"><h1>Small signals.<br>Thoughtful plans.</h1><p>Daily connects what your day looks like with what actually works for you.<br><br>Explore the loop. You’re always the one who says yes.</p></div>
+      <div class="how-flow-card"><div class="how-card-label"><span>THE DAYWISE LOOP</span><a href="/tech-flow.svg" download="daywise-tech-flow.svg">Download graphic ↗</a></div><img class="how-flow-image" src="/tech-flow.svg" alt="Texts, optional workspace photos and location, and Google Calendar feed a bounded agent. LinUCB estimates productivity and mood. Calendar rules check availability. You approve a change, then rate a session. Private Supabase history informs future suggestions." width="1120" height="580"></div>
+      <div class="how-explore-label"><span>FOLLOW A SIGNAL</span><span>Choose a step to look inside ↓</span></div>
+      <div class="how-explorer"><div class="how-step-list" role="group" aria-label="Explore how Daywise works"><button data-flow-step="0" aria-pressed="true"><span>01</span> Notice your day <b>↗</b></button><button data-flow-step="1" aria-pressed="false"><span>02</span> Find a good fit <b>↗</b></button><button data-flow-step="2" aria-pressed="false"><span>03</span> Ask, then act <b>↗</b></button><button data-flow-step="3" aria-pressed="false"><span>04</span> Learn what worked <b>↗</b></button></div><article class="how-detail" id="flowDetail" aria-live="polite"></article></div>
+      <div class="how-footer"><img src="/daily.svg" width="100" height="100" alt="Daily, your blue penguin companion"><div><h2>More you. Less guesswork.</h2><p>Ratings describe patterns, not causes. A noisy session, your mood, and a phone interruption all matter. Daily keeps uncertainty visible and waits for permission before changing your calendar.</p><button class="how-open-daily" data-open-daily>Meet your Daily ↗</button></div></div>
+    </section>
+  </main>
+  <aside class="daily-widget" id="dailyWidget" aria-label="Daily companion">
+    <section class="daily-panel" id="dailyPanel" role="dialog" aria-label="Your Daily companion" hidden>
+      <header class="daily-panel-top"><div><span class="daily-kicker">YOUR LITTLE STUDY SIDEKICK</span><h2 id="dailyGreeting">Hey, you.</h2></div><button id="dailyClose" class="daily-icon-button" aria-label="Close Daily">×</button></header>
+      <nav class="daily-tabs" aria-label="Companion sections"><button data-daily-tab="today" aria-pressed="true">Today</button><button data-daily-tab="focus" aria-pressed="false">Focus</button><button data-daily-tab="yours" aria-pressed="false">Make it yours</button></nav>
+      <div id="dailyToday" class="daily-tab-content"><p id="dailyMessage">A little room to breathe. A little room to focus.</p><div id="dailyLiveContext" class="daily-context">Connect your private code on Dashboard and I’ll show a little context from your history here.</div><a class="daily-primary" href="/dashboard">Peek at my day ↗</a><button class="daily-command" data-copy-command="find me a time to study">Copy “find me a time to study” <span>↗</span></button><p class="daily-fineprint" id="dailyCopyStatus">Paste the command into your bot chat to ask for a suggestion.</p></div>
+      <div id="dailyFocus" class="daily-tab-content" hidden><p>One thing at a time is plenty.</p><div class="daily-duration" role="group" aria-label="Focus timer length"><button data-focus-minutes="15">15 min</button><button data-focus-minutes="25" aria-pressed="true">25 min</button><button data-focus-minutes="45">45 min</button></div><div class="daily-clock" id="dailyClock" role="timer" aria-label="Focus time remaining">25:00</div><p class="daily-timer-status" id="dailyTimerStatus" role="status">A quiet timer, just for this browser.</p><div class="daily-timer-actions"><button id="dailyTimerToggle" class="daily-primary">Start a little focus</button><button id="dailyTimerReset" class="daily-command">Reset</button></div><p class="daily-fineprint">This timer doesn’t log a study session or change your calendar. Use your bot to track and rate a session.</p></div>
+      <div id="dailyYours" class="daily-tab-content" hidden><form id="dailyPreferences"><label for="dailyName">What should I call you?</label><input id="dailyName" maxlength="28" placeholder="Your nickname" autocomplete="off"><label for="dailyIntent">What kind of day feels right?</label><select id="dailyIntent"><option value="balanced">A little balance</option><option value="focus">Deep focus</option><option value="gentle">An easy pace</option></select><label class="daily-checkbox"><input type="checkbox" id="dailyCalm"> Keep things still (less motion)</label><button class="daily-primary" type="submit">That’s my vibe ✓</button><p class="daily-fineprint" id="dailySaved" role="status">Saved only in this browser. These preferences change your companion, not the learning model.</p></form></div>
+    </section>
+    <button class="daily-launcher" id="dailyLauncher" aria-label="Open Daily, your study companion" aria-expanded="false" aria-controls="dailyPanel"><span class="daily-hello" id="dailyHello">A little help?</span><img src="/daily.svg" alt="" width="96" height="96"><span class="daily-online" aria-hidden="true"></span></button>
+  </aside>
+
   <!-- Toast Notification -->
   <div class="toast-banner hidden" id="appToast"></div>
 
   <script type="module" src="/assets/app.js"></script>
   <script type="module" src="/assets/learning.js"></script>
+  <script type="module" src="/assets/companion.js"></script>
 </body>
 </html>

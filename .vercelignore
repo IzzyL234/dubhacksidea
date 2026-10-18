@@ -1,0 +1,19 @@
+# Only website assets and the private hosted API need to leave this computer.
+**
+!frontend
+!frontend/**
+!api
+!api/**
+!src
+!src/hosted-web.ts
+!src/learning-web.ts
+!src/insights.ts
+!src/learning.ts
+!src/time.ts
+!src/schedule-review-public.ts
+!data
+!data/seed_sessions.json
+!package.json
+!bun.lock
+!tsconfig.json
+!vercel.json
