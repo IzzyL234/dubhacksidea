@@ -6,12 +6,13 @@
   "scripts": {
     "start": "bun src/index.ts",
     "dev": "bun --watch src/index.ts",
-    "web": "node --experimental-transform-types --env-file-if-exists=.env src/web-server.ts",
+    "web": "bun src/web-server.ts",
     "backend": "python3 -m backend.main",
     "photon": "node --experimental-transform-types --env-file-if-exists=.env bridge/photon.mjs",
     "test": "python3 -m unittest test_backend.py",
     "start:node": "node --experimental-transform-types --env-file-if-exists=.env src/index.ts",
-    "test:bot": "bun test tests"
+    "test:bot": "bun test tests",
+    "web:node": "node --experimental-transform-types --env-file-if-exists=.env src/web-server.ts"
   },
   "dependencies": {
     "@google-cloud/local-auth": "^3.0.1",

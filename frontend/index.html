@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/assets/styles.css" />
+  <link rel="stylesheet" href="/assets/learning.css" />
 </head>
 <body>
   <!-- =====================================================================
@@ -34,6 +35,8 @@
           <path d="M 15 0 L 7.5 7.5 L 0 0 Z" transform="translate(4.5 9)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
       </button>
+      <button class="nav-tab" data-view="getStarted" id="tabGetStarted"><span class="nav-tab-label">GET STARTED</span></button>
+      <button class="nav-tab" data-view="insights" id="tabInsights"><span class="nav-tab-label">INSIGHTS</span></button>
     </nav>
   </header>
 
@@ -242,7 +245,7 @@
             <path fill="#FBBC05" d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14z"/>
             <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96z"/>
           </svg>
-          <span>CONTINUE WITH GOOGLE</span>
+          <span>PREVIEW DEMO CALENDAR</span>
           <span class="btn-arrow">&rarr;</span>
         </button>
 
@@ -258,7 +261,7 @@
        Framer Calendar Hero ("YOUR BEST CALENDAR." + Tapping Penguin #3) +
        Perforated Stamp Paper Frame with Decluttered Upcoming Tasks from Google Calendar
        ===================================================================== -->
-  <main id="viewDashboard" class="view-section hidden">
+  <main id="viewDashboard" class="view-section hidden"><section class="learning-section"><div class="learning-panel"><div id="learningConnection"></div><p data-learning-status role="status" aria-live="polite">Connect your private dashboard code to see saved history.</p></div></section><section class="learning-section"><h2>Your day, in view.</h2><div class="learning-panel" id="learningOverview"></div><div class="learning-panel"><h3>Schedule reviews</h3><div id="learningReviews"></div></div></section>
     <!-- TOP HERO SECTION (From Framer Calendar Tab: #DFDFDF Background + Royal Blue Type + Penguin #3) -->
     <section class="dashboard-framer-hero">
       <div class="framer-container">
@@ -382,6 +385,7 @@
       </div>
     </section>
 
+    <section class="learning-section"><a class="learning-calendar-link" href="https://calendar.google.com/calendar/u/0/r" target="_blank" rel="noopener noreferrer">Open in Google Calendar ↗</a><div class="learning-panel"><h3>Agent activity</h3><div id="learningActivity"></div></div></section>
     <footer class="framer-grid-footer"></footer>
   </main>
 
@@ -417,9 +421,14 @@
     </div>
   </main>
 
+
+  <main id="viewGetStarted" class="view-section hidden"><section class="learning-section"><h2>Just send a text.</h2><div class="onboarding-split"><div class="learning-places" id="learningPlaces"></div><div><h3>Your study companion</h3><ol class="learning-steps"><li><strong>Start studying.</strong> Text “start studying” and send a workspace photo.</li><li><strong>Make it yours.</strong> The agent tries location matching first. If it cannot identify the place, it asks at the end.</li><li><strong>Check in.</strong> Text “done”, then rate productivity, mood, and distractions from 1 to 5.</li><li><strong>See what works.</strong> Connect your private dashboard code to explore scores, decisions, and insights.</li></ol><a href="/dashboard">Connect on Dashboard →</a></div></div></section></main>
+  <main id="viewInsights" class="view-section hidden"><section class="learning-section"><h2>What your history tells us.</h2><p data-learning-status role="status">Connect on Dashboard to see your private history.</p><p><a href="/dashboard">← Dashboard</a></p><div id="learningInsights"></div></section></main>
+
   <!-- Toast Notification -->
   <div class="toast-banner hidden" id="appToast"></div>
 
   <script type="module" src="/assets/app.js"></script>
+  <script type="module" src="/assets/learning.js"></script>
 </body>
 </html>

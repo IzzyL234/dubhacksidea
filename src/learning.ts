@@ -13,6 +13,7 @@ export type Observation = LearningContext & {
   id: string;
   user_productivity_rating: number;
   user_mood_rating: number;
+  user_distraction_rating?:number; distraction_attribution?:"interruption"|"setup"|"unsure"|null;
 };
 export type Candidate = Context & { id: string; label: string };
 export type Policy = { productivityWeight?: number; alpha?: number };
@@ -63,6 +64,7 @@ export function seedObservation(row: unknown): Observation {
     location: r.location, study_space: r.study_space,
     environment: tags && { clutter_score: tags.clutter_score, lighting: tags.lighting, ergonomics: tags.ergonomics },
     user_productivity_rating: r.user_productivity_rating, user_mood_rating: r.user_mood_rating,
+    ...(r.user_distraction_rating!==undefined?{user_distraction_rating:r.user_distraction_rating,distraction_attribution:r.distraction_attribution??null}:{}),
   };
   validateObservation(observation);
   return observation;
@@ -70,6 +72,7 @@ export function seedObservation(row: unknown): Observation {
 
 function validateObservation(observation: Observation): void {
   features(observation);
+  if(observation.user_distraction_rating!==undefined&&(!Number.isInteger(observation.user_distraction_rating)||observation.user_distraction_rating<1||observation.user_distraction_rating>5||![null,undefined,"interruption","setup","unsure"].includes(observation.distraction_attribution)))throw Error("Invalid distraction feedback");
   if (typeof observation.id !== "string" || !observation.id.trim()) throw new Error("Session ID is required");
   for (const key of ["user_productivity_rating", "user_mood_rating"] as const) {
     const rating = bounded(observation[key], 1, 5, key);
@@ -104,7 +107,7 @@ export class StudyLearner {
       Array.from({ length: dimension }, (_, j) => i === j ? 1 / lambda : 0));
   }
 
-  observe(observation: Observation, sampleWeight = 1): void {
+  observe(observation: Observation, sampleWeight = observation.user_distraction_rating!==undefined&&observation.user_distraction_rating>=4&&observation.distraction_attribution==="interruption"?.25:1): void {
     validateObservation(observation);
     bounded(sampleWeight, 0.000001, 1, "sampleWeight");
     if (this.ids.has(observation.id)) throw new Error(`Session already learned: ${observation.id}`);

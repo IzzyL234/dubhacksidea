@@ -1,3 +1,5 @@
+import {liveCalendarView} from "./live-calendar-web.ts";
+import {learningDashboard} from "./learning-web.ts";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -14,8 +16,8 @@ const ROOT_DIR = fileURLToPath(new URL("..", import.meta.url));
 const FRONTEND_DIR = join(ROOT_DIR, "frontend");
 const STATE_FILE = join(ROOT_DIR, "backend", "state.json");
 const CREDENTIALS_FILE = join(ROOT_DIR, "credentials.json");
-const TOKEN_FILE = join(ROOT_DIR, ".google-calendar-token.json");
-const WRITE_TOKEN_FILE = join(ROOT_DIR, ".google-calendar-write-token.json");
+const TOKEN_FILE = process.env.GOOGLE_CALENDAR_TOKEN_FILE || join(ROOT_DIR, ".google-calendar-token.json");
+const WRITE_TOKEN_FILE = process.env.GOOGLE_CALENDAR_WRITE_TOKEN_FILE || join(ROOT_DIR, ".google-calendar-write-token.json");
 
 const PORT = Number(process.env.PORT || 3000);
 const BACKEND_URL = (process.env.BACKEND_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
@@ -430,111 +432,22 @@ function buildOfflineProposalFromText(text: string, state: Record<string, any>, 
  * Fetches live Google Calendar events if authorized, or falls back cleanly to
  * the demo schedule + state.json events so the Dashboard's daily snapshot is always populated.
  */
-async function fetchGoogleCalendarDailySample(state: Record<string, any>) {
-  let gcalEvents: any[] = [];
-  let source = "google_calendar_integration";
-  const now = Date.now();
-  const startOfDay = new Date(now);
-  startOfDay.setHours(0, 0, 0, 0);
-  const endWindow = now + 7 * 86_400_000;
-
-  try {
-    const rawList = await demoCalendar.list(startOfDay.getTime(), endWindow);
-    if (rawList.length > 0) {
-      gcalEvents = rawList.map(ev => ({
-        id: ev.id ?? `gcal_${randomUUID().slice(0, 6)}`,
-        title: (ev.summary ?? "Untitled Event").replace(/^\[DEMO\]\s*/i, ""),
-        start_time: ev.start?.dateTime ?? ev.start?.date ?? new Date().toISOString(),
-        end_time: ev.end?.dateTime ?? ev.end?.date ?? new Date().toISOString(),
-        source: "google_calendar_live",
-        is_demo_seed: Boolean(ev.summary?.startsWith("[DEMO]")),
-      }));
-      currentAuthSession.liveGoogleConnected = true;
-    }
-  } catch {
-    // Fallback to state.json + demoSchedule sample
-  }
-
-  if (gcalEvents.length === 0) {
-    const stateEvents = (state.events ?? []).map((e: any) => ({
-      id: e.id,
-      title: e.title,
-      start_time: e.start_time,
-      end_time: e.end_time,
-      source: e.source === "inferred_routine" ? "inferred_routine" : "google_calendar_synced",
-    }));
-
-    if (stateEvents.length > 0) {
-      gcalEvents = stateEvents;
-    } else {
-      const seeded = demoSchedule(now).slice(0, 6);
-      gcalEvents = seeded.map(ev => ({
-        id: ev.id,
-        title: (ev.summary ?? "Event").replace(/^\[DEMO\]\s*/i, ""),
-        start_time: ev.start.dateTime,
-        end_time: ev.end.dateTime,
-        source: "google_calendar_demo",
-      }));
-      source = "google_calendar_demo_seed";
-    }
-  }
-
-  let openWindowsList: { start: string; end: string; duration_mins: number }[] = [];
-  try {
-    const wins = (await getOpenStudyWindows(now)).slice(0, 4);
-    openWindowsList = wins.map(w => ({
-      start: new Date(Math.max(w.start, now)).toISOString(),
-      end: new Date(w.end).toISOString(),
-      duration_mins: Math.max(15, Math.floor((w.end - Math.max(w.start, now)) / 60_000)),
-    }));
-  } catch {
-    openWindowsList = [
-      {
-        start: "2026-10-19T11:40:00+00:00",
-        end: "2026-10-19T13:50:00+00:00",
-        duration_mins: 130,
-      },
-      {
-        start: "2026-10-19T20:00:00+00:00",
-        end: "2026-10-19T23:30:00+00:00",
-        duration_mins: 210,
-      },
-    ];
-  }
-
-  const studyBlocks = (state.blocks ?? []).map((b: any) => ({
-    id: b.id,
-    title: b.title,
-    start_time: b.start_time,
-    end_time: b.end_time,
-    recommended_location: b.recommended_location,
-    source: "google_calendar_synced",
-  }));
-
-  const combinedUpcoming = [...gcalEvents, ...studyBlocks]
-    .sort((a, b) => Date.parse(a.start_time || "") - Date.parse(b.start_time || ""))
-    .slice(0, 8);
-
-  // Return a focused daily sample of upcoming tasks pulled from Google Calendar integration data
-  return {
-    calendar_id: DEMO_CALENDAR,
-    source,
-    authenticated: currentAuthSession.authenticated,
-    user: currentAuthSession.user,
-    upcoming_tasks: combinedUpcoming,
-    today_events_sample: combinedUpcoming.slice(0, 6),
-    today_study_blocks_sample: (state.blocks ?? []).slice(0, 5),
-    active_assignments: (state.assignments ?? []).slice(0, 4),
-    open_focus_windows: openWindowsList,
-  };
+async function fetchGoogleCalendarDailySample(_state: Record<string, any>) {
+  const live=await liveCalendarView(demoCalendar);
+  currentAuthSession.liveGoogleConnected=live.authenticated;
+  currentAuthSession.authenticated=live.authenticated;
+  return {...live,calendar_id:DEMO_CALENDAR,user:{...currentAuthSession.user,calendar_name:"Google Calendar · Pacific"},today_events_sample:live.upcoming_tasks.slice(0,5),open_focus_windows:[]};
 }
-
 export async function handleWebRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const host = req.headers.host || `localhost:${PORT}`;
   const url = new URL(req.url || "/", `http://${host}`);
   const pathname = url.pathname;
   const method = (req.method || "GET").toUpperCase();
 
+  if(pathname==="/api/learning/dashboard"){
+    const response=method==="GET"?await learningDashboard(req.headers.authorization):new Response(JSON.stringify({error:"Read-only endpoint."}),{status:405,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}});
+    res.writeHead(response.status,Object.fromEntries(response.headers));res.end(await response.text());return;
+  }
   if (method === "OPTIONS") {
     res.writeHead(204, {
       "Access-Control-Allow-Origin": "*",
@@ -1051,6 +964,8 @@ export async function handleWebRequest(req: IncomingMessage, res: ServerResponse
     if (
       pathname === "/" ||
       pathname === "/dashboard" ||
+      pathname === "/about" ||
+      pathname === "/insights" ||
       pathname === "/customize" ||
       pathname === "/calendar" ||
       pathname === "/approve" ||
