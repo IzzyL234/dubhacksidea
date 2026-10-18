@@ -7,6 +7,8 @@
 // 2. Links the photo session to `StudySessions` and triggers follow-up rating check-in (`FeedbackFlow`)
 //    when the user finishes studying ("done" / "rate session") or chats with Grok (`XAI_API_KEY`).
 
+import {acquireInstance,AlreadyRunning} from '../src/single-instance.ts';
+import {fileURLToPath} from 'node:url';
 import { Spectrum } from 'spectrum-ts';
 import { imessage } from '@spectrum-ts/imessage';
 import { createHash } from 'node:crypto';
@@ -49,6 +51,8 @@ if (!projectId || !projectSecret) {
   console.error('❌ Error: SPECTRUM_PROJECT_ID and SPECTRUM_PROJECT_SECRET are required in .env');
   process.exit(1);
 }
+
+try { const release=acquireInstance(fileURLToPath(new URL('../data/runtime/bot-instance.json',import.meta.url))); process.once('exit',release); } catch(error) { if(error instanceof AlreadyRunning) {console.log(error.message);process.exit(0);} throw error; }
 
 console.log('🚀 Connecting to Photon Spectrum Cloud...');
 console.log(`📱 Project ID: ${projectId}`);

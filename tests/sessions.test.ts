@@ -99,11 +99,11 @@ test("high unrelated distraction reduces influence, but never changes the report
 test("photo API validates structured output, refuses missing data, and never uses mock values",async()=>{
   let sent:Record<string,any>|undefined;
   const request=async(_url:string,init?:RequestInit)=>{sent=JSON.parse(String(init?.body));return Response.json({choices:[{finish_reason:"stop",message:{content:JSON.stringify({clutter_score:4,lighting:"dim",ergonomics:null})}}]});};
-  expect(await analyzePhoto(new Uint8Array([1]),"image/jpeg","test-key",request)).toEqual({clutter_score:4,lighting:"dim",ergonomics:null});
+  expect(await analyzePhoto(new Uint8Array([255,216,255,224]),"image/jpeg","test-key",request)).toEqual({clutter_score:4,lighting:"dim",ergonomics:null});
   expect(sent?.messages[0].content[1].image_url.url).toStartWith("data:image/jpeg;base64,");
   expect(()=>validateWorkspace({clutter_score:3,lighting:"bright"})).toThrow();
   expect(()=>validateWorkspace({clutter_score:99,lighting:"bright",ergonomics:7})).toThrow();
-  await expect(analyzePhoto(new Uint8Array([1]),"image/jpeg","test-key",async()=>new Response(null,{status:429}))).rejects.toThrow("429");
+  await expect(analyzePhoto(new Uint8Array([255,216,255,224]),"image/jpeg","test-key",async()=>new Response(null,{status:429}))).rejects.toThrow("429");
 });
 test("Spectrum grouped photos are processed as child messages while outbound echoes are excluded",()=>{
   const image={id:"image",direction:"inbound",content:{type:"attachment",mimeType:"image/jpeg"}};

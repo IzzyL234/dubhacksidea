@@ -1,5 +1,9 @@
 import { google } from "googleapis";
 import { readFile } from "node:fs/promises";
+import { type StudyBlock } from "./study-events.ts";
+import { demoCalendar } from "./calendar-api.ts";
+import { openWindows } from "./open-time.ts";
+import { addDays, localDate, parseCalendarTime, formatTime } from "./time.ts";
 
 const calendarId = "c_8a3f88a63add1862899e38c8eb168366805a752ed4bc3283303e5a68823964bf@group.calendar.google.com";
 const tokenFile = new URL("../.google-calendar-token.json", import.meta.url);
@@ -39,4 +43,17 @@ export async function getUpcomingCalendarReply(): Promise<string> {
   });
 
   return `Coming up on Hackathon Demo (${timezone}):\n\n${events.join("\n")}`;
+}
+
+export async function getOpenStudyWindows(now = Date.now()): Promise<StudyBlock[]> {
+  const start = parseCalendarTime(`${localDate(now)} 00:00`);
+  const end = parseCalendarTime(`${addDays(localDate(now),7)} 00:00`);
+  return openWindows(await demoCalendar.busy(start,end),now);
+}
+export async function getOpenTimeReply(now = Date.now()): Promise<string> {
+  const windows=(await getOpenStudyWindows(now)).slice(0,6);
+  if(!windows.length)return "No 30-minute openings found in the next 7 days at any hour, allowing 10-minute buffers.";
+  return "Open time based on Hackathon Demo only (Pacific; 10-minute buffers):\n"+windows.map(w=>{
+    const start=Math.max(w.start,now);return `• ${formatTime(start)} to ${formatTime(w.end)} (${Math.floor((w.end-start)/60000)} minutes)`;
+  }).join("\n")+"\nAn empty calendar slot is a suggestion, not proof you're available.";
 }
