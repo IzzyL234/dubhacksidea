@@ -20,3 +20,5 @@
 .learning-walkthrough h3{font:600 16px/1.5 var(--font-sans);color:#0054b5;margin:0 0 7px}
 .learning-walkthrough p{margin:0!important}
 @media(max-width:760px){.learning-walkthrough{min-height:196px}.how-training-loop button{font-size:11px;min-height:90px}}
+
+.how-diagram-heading{margin:38px 0 20px}.how-diagram-heading h2{font:30px/1.2 var(--font-display);color:#0054b5;margin-bottom:12px}.how-diagram-heading p{font:13px/1.85 var(--font-sans);color:#536172;max-width:800px}
