@@ -94,3 +94,10 @@ test('agent place evidence does not fabricate a favorite from ratings without re
  const d=await root(),row=pair();row.session_record.location=null;
  const s=new StudySessions(join(d,'sessions'),null,join(d,'feedback'),'missing-seed',undefined,{load:async()=>[row]});const r=await s.placeRecommendations('private-chat');expect(r.personalObservations).toBe(1);expect(r.places).toHaveLength(0);
 });
+
+test('starter place candidates remain available with partial personal ratings and share the combined trained model',async()=>{
+ const d=await root(),row=pair();row.session_record.location=null;row.session_record.study_space=null;
+ const s=new StudySessions(join(d,'sessions'),null,join(d,'feedback'),undefined,undefined,{load:async()=>[row]}).enableDemoPrior();
+ const before=await s.placeRecommendations('private-chat');expect(before.personalObservations).toBe(1);expect(before.starterObservations).toBeGreaterThan(0);expect(before.places.length).toBeGreaterThan(1);expect(before.modelObservations).toBe(before.starterObservations+1);expect(before.places.every(p=>p.matchingPersonalSessions===0&&p.matchingStarterSessions>0&&p.basis==='starter_history')).toBe(true);
+ row.feedback_record.productivity_rating=5;row.feedback_record.mood_rating=5;const after=await s.placeRecommendations('private-chat');const place=before.places[0]!.place;expect(after.places.find(p=>p.place===place)!.productivity).not.toBe(before.places[0]!.productivity);
+});
