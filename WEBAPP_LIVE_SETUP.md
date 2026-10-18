@@ -51,7 +51,7 @@ The teammate's existing `/approve/:batchId` planner screen remains available. Ne
 
 ## Interactive website and Vercel
 
-The **How it works** tab at `/how-it-works` includes a downloadable SVG architecture graphic and four interactive explanation steps. The floating **Daily** mascot has a private-history summary, copyable bot command, 15/25/45-minute browser focus timer, nickname, preferred tone, and reduced-motion setting. Nickname/tone settings stay in local browser storage; they do not change the model or send data to the server. The timer does not create a tracked session. Use the bot to start, finish, and rate sessions.
+The **How it works** tab at `/how-it-works` includes a downloadable SVG architecture graphic and four interactive explanation steps. The floating **Daily** mascot has a private-history summary, copyable bot command, nickname, preferred tone, and reduced-motion setting. Nickname/tone settings stay in local browser storage; they do not change the model or send data to the server. Use the bot to start, finish, and rate sessions.
 
 `vercel.json` hosts only `frontend/` and `api/index.ts`. The hosted API proxies the existing private Supabase dashboard endpoint, with no database service key or Google OAuth tokens. Shared local calendar, OAuth, and legacy demo-write routes are deliberately unavailable publicly. Connect your private dashboard code to see that chat's synced calendar and model.
 
