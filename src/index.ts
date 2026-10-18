@@ -355,6 +355,11 @@ async function handleEnvelope(space:BotInboxItem[0],envelope:BotInboxItem[1]) {
         continue;
       }
     }
+    if(await calendarCommands.shouldHandleTurn(space.id,incoming)){
+      if(!await conversationAgent.clearUnattemptedOffer(space.id)){await space.send("An earlier booking still has an uncertain result. Please check or retry that proposal before creating another event.");continue;}
+      const eventReply=await calendarCommands.handle(space.id,incoming,message.id);
+      if(eventReply!==null){await space.send(eventReply);void pollStudyReminders();continue;}
+    }
     if(!/^(calendar events|calendar help|add event(?:\s|$)|move event(?:\s|$)|rename event(?:\s|$)|reset$)/i.test(incoming)&&!isUpcomingRequest(incoming)){
       const answer=await conversationAgent.run(space.id,incoming,message.id);
       if(answer?.cancelled)continue;

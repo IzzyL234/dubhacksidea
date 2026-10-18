@@ -25,3 +25,7 @@ Natural place questions now reach this tool-using conversational path instead of
 ## Local text-provider selection
 
 An optional, untracked `data/runtime/text-provider.json` containing `{"provider":"gemini"}` or `{"provider":"xai"}` overrides the existing AI_PROVIDER value for local bot runs. It contains no API key. When absent, AI_PROVIDER and the existing xAI default retain their previous behavior. The selected provider still uses its existing environment credential and model setting. This supports switching away from a provider billing outage without reading or rewriting .env. The active installation was tested with Gemini 3.5 Flash; user-specific provider choices are not committed.
+
+## Named-event follow-ups
+
+Named non-study calendar creation and its pending time/duration replies are routed to the persistent event editor before the free-study planner. Clarification state retains the original request and reference instant for fifteen minutes across restarts. Explicit weekday, today/tomorrow and ISO date anchors are provided to the interpreter and checked before creating an event. A conflicting model-generated date returns a clarification rather than silently booking another day. Creating a named event does not search for or substitute a generic study block. A new event request discards only an unattempted study offer; uncertain attempted bookings are preserved for recovery.

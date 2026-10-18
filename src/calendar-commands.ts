@@ -5,10 +5,20 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import type { CalendarGateway,DemoEvent,EventInput } from "./calendar-types.ts";
 import { formatTime,parseCalendarTime,TIMEZONE } from "./time.ts";
-type State={pending?:{texts:string[];expires:number};plans?:Record<string,string>;listedAt?:number;events:DemoEvent[];replies:{id:string;reply:string}[]};
+type State={pending?:{texts:string[];expires:number;referenceNow?:number};plans?:Record<string,string>;listedAt?:number;events:DemoEvent[];replies:{id:string;reply:string}[]};
+export function isCalendarWriteRequest(text:string){
+ const t=text.trim();if(/^(?:schedule review|review schedule)\b/i.test(t))return false;
+ if(/\bstud(?:y|ying)\b/i.test(t)&&!/^add event\b/i.test(t)&&!/\b(?:club|meeting|appointment)\b/i.test(t))return false;
+ return /^(?:(?:hey|please|can you|could you|would you|will you|i want(?: you)? to|i would like(?: you)? to|i'd like(?: you)? to|lets|let's)\s+)*(?:schedule|book|add|create|put)\b/i.test(t);
+}
 export class CalendarCommands {
   private locks=new Map<string,Promise<unknown>>();
   constructor(private gateway:CalendarGateway,private directory=fileURLToPath(new URL("../data/calendar-commands/",import.meta.url)),private now=Date.now,private interpret?: (text:string,previous:string[],now:number)=>Promise<CalendarIntent>){}
+  async shouldHandleTurn(conversation:string,text:string):Promise<boolean>{
+    if(isCalendarWriteRequest(text))return true;
+    const path=join(this.directory,`${createHash("sha256").update(conversation).digest("hex")}.json`);
+    try{const state=JSON.parse(await readFile(path,"utf8")) as State;return !!state.pending&&state.pending.expires>this.now();}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return false;throw e;}
+  }
   async handle(conversation:string,text:string,messageId:string):Promise<string|null>{
     const command=text.trim();
     if(!this.interpret&&!/^(calendar events|calendar help|add event(?:\s|$)|move event(?:\s|$)|rename event(?:\s|$))/i.test(command))return null;
@@ -31,10 +41,11 @@ export class CalendarCommands {
       if(state.plans?.[messageId])command=state.plans[messageId]!;
       else {
         const previous=state.pending&&state.pending.expires>this.now()?state.pending.texts:[];
-        const intent=await this.interpret(text,previous,this.now());
+        const referenceNow=previous.length?state.pending?.referenceNow??this.now():this.now();
+        const intent=await this.interpret(text,previous,referenceNow);
         if(intent.action==="none"){delete state.pending;await persist();return null;}
         if(intent.action==="clarify"){
-          state.pending={texts:[...previous,text].slice(-6),expires:this.now()+15*60000};
+          state.pending={texts:[...previous,text].slice(-6),expires:this.now()+15*60000,referenceNow};
           const answer=intent.question!;state.replies=[...state.replies,{id:messageId,reply:answer}].slice(-40);await persist();return answer;
         }
         command=intent.action==="list"?"calendar events":`add event ${intent.title} | ${intent.start} | ${intent.end}`;
