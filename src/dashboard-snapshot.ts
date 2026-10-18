@@ -1,0 +1,22 @@
+import {dashboardActivity,type ActivityItem} from "./dashboard-activity.ts";
+import {features,StudyLearner,FEATURE_NAMES,train,type Context} from './learning.ts';
+type Row=Record<string,any>;
+export type DashboardSnapshot={updatedAt:string;dataAsOf:string|null;model:{algorithm:string;observations:number;demoObservations:number;totalObservations:number;excluded:number;status:'needs_feedback'|'learning';weights:{feature:string;productivity:number;mood:number}[]};prediction:null|{label:string;recordedAt:string;productivity:number;mood:number;uncertainty:number};history:{date:string;productivity:number;mood:number;distraction:number;place:string}[];events:ActivityItem[];active:null|{startedAt:string;status:string;place:string|null;plannedMinutes:number|null}};
+const rounded=(v:number)=>Math.round(v*100)/100;
+export function feedbackWeight(f:Row):number{if(f.distraction_rating<4)return 1;if(f.distraction_attribution==='interruption')return .25;if(f.distraction_attribution!=null)return 1;return ['phone','other'].includes(f.distraction_source??'')?.25:1;}
+function context(s:Row):Context|null{const c={timestamp:s.started_at,duration_mins:s.duration_mins,location:s.location,study_space:s.study_space,environment:s.environment} as Context;try{features(c);return c;}catch{return null;}}
+export function buildDashboardSnapshot(user:string,pairs:unknown[],events:unknown[],sessions:unknown[],now=Date.now(),demoRows:unknown[]=[]):DashboardSnapshot{
+ if(!/^[a-f0-9]{64}$/.test(user))throw Error('Invalid identity');const learner=new StudyLearner(),seen=new Set<string>(),history:DashboardSnapshot['history']=[];let excluded=0,personal=0,latest:Context|null=null;const demo=train(demoRows).observations;for(const row of demo)learner.observe({...row,id:"demo:"+row.id});
+ const ordered=[...pairs].sort((a,b)=>String((a as Row)?.session_record?.started_at??'').localeCompare(String((b as Row)?.session_record?.started_at??'')));
+ for(const raw of ordered){const pair=raw as Row,s=pair?.session_record,f=pair?.feedback_record;
+  if(!s||!f||s.user_id!==user||f.conversation_key!==user||s.status!=='completed'||s.feedback_id!==f.id||s.id!==f.session_id||s.is_synthetic!==false||f.is_synthetic!==false||typeof f.id!=='string'||seen.has(f.id))continue;
+  seen.add(f.id);const c=context(s);if(!c){excluded++;continue;}
+  try{learner.observe({...c,id:f.id,user_productivity_rating:f.productivity_rating,user_mood_rating:f.mood_rating},feedbackWeight(f));personal++;latest=c;history.push({date:s.started_at,productivity:f.productivity_rating,mood:f.mood_rating,distraction:f.distraction_rating,place:s.location});}catch{excluded++;}
+ }
+ const activeRow=sessions.find(raw=>{const s=raw as Row;return s?.user_id===user&&s.is_synthetic===false&&['active','awaiting_feedback'].includes(s.status);}) as Row|undefined;
+ const activeContext=activeRow?context(activeRow):null,predictContext=activeContext??latest??(demo.length?demo[demo.length-1] as Context:null);const prediction=learner.count&&predictContext?learner.predict(predictContext):null;
+ const safeEvents=dashboardActivity(user,events);
+ const dates=[...history.map(h=>h.date),...safeEvents.map(e=>e.at),...(activeRow?[activeRow.started_at]:[])].filter(x=>Number.isFinite(Date.parse(x))).sort((a,b)=>Date.parse(b)-Date.parse(a));
+ const state=learner.toState(user,new Map());
+ return {updatedAt:new Date(now).toISOString(),dataAsOf:dates[0]??null,model:{algorithm:'LinUCB / weighted ridge',observations:personal,demoObservations:demo.length,totalObservations:learner.count,excluded,status:learner.count?'learning':'needs_feedback',weights:learner.count?FEATURE_NAMES.map((feature,i)=>({feature,productivity:rounded(state.theta_productivity[i]!*2),mood:rounded(state.theta_mood[i]!*2)})):[]},prediction:prediction&&predictContext?{label:activeContext?'Current recorded setup':latest?'Most recent recorded setup':'Demo example setup (synthetic, not your current workspace)',recordedAt:predictContext.timestamp,productivity:rounded(prediction.predictedProductivity),mood:rounded(prediction.predictedMood),uncertainty:rounded(prediction.uncertainty)}:null,history:history.slice(-12).reverse(),events:safeEvents,active:activeRow?{startedAt:activeRow.started_at,status:activeRow.status,place:typeof activeRow.location==='string'?activeRow.location:null,plannedMinutes:typeof activeRow.duration_mins==='number'?activeRow.duration_mins:null}:null};
+}
