@@ -7,7 +7,7 @@ import type { StudyBlock } from "./study-events.ts";
 type Delivery = { block: StudyBlock; startAttempted?: boolean; sessionId?: string; endAttempted?: boolean };
 type State = {
   conversation?: string; enabled: boolean; quietStart: number; quietEnd: number;
-  events: Record<string,Delivery>; pending?: {key:string;expires:number}; lastPrompt?:number; snoozeUntil?:number;
+  events: Record<string,Delivery>; pending?: {key:string;expires:number;kind?:"place"}; lastPrompt?:number; snoozeUntil?:number;
   replies:{id:string;conversation:string;reply:string}[];
 };
 export type ReminderDependencies = {
@@ -17,7 +17,8 @@ export type ReminderDependencies = {
   start: (conversation:string,block:StudyBlock)=>Promise<{id:string;reply:string}|null>;
   active: (conversation:string,id:string)=>Promise<boolean>;
   checkIn: (conversation:string)=>Promise<boolean>;
-  evaluate?:(conversation:string,block:StudyBlock)=>Promise<{allow:boolean;message?:string}>;
+  evaluate?:(conversation:string,block:StudyBlock)=>Promise<{allow:boolean;message?:string;kind?:"place"}>;
+  resolvePlace?:(conversation:string,accept:boolean)=>Promise<string>;
   confirm?:(conversation:string,block:StudyBlock)=>Promise<boolean>;
   audit?:(conversation:string,reason:string)=>Promise<void>;
   outcome?:(conversation:string,kind:"accepted"|"skipped")=>Promise<void>;
@@ -76,7 +77,12 @@ export class StudyReminders {
         // "skip" can also be an answer in the existing distraction-source check-in.
         if(await this.deps.checkIn(conversation))return null;
         const pending=state.pending;
-        if(command==="skip"){delete state.pending;state.snoozeUntil=this.now()+60*60_000;await this.save(state);await this.outcome(conversation,"skipped");reply="Skipped this study block. No session was created.";}
+        if(pending.kind==="place"){
+          reply=await this.deps.resolvePlace?.(conversation,command==="yes")??"Place confirmation unavailable. Nothing was saved.";
+          if(command==="skip")state.snoozeUntil=this.now()+60*60_000;
+          delete state.pending;
+        }
+        else if(command==="skip"){delete state.pending;state.snoozeUntil=this.now()+60*60_000;await this.save(state);await this.outcome(conversation,"skipped");reply="Skipped this study block. No session was created.";}
         else if(this.now()>pending.expires){delete state.pending;reply="That study prompt has expired. Text start studying if you're starting now.";}
         else{
           // Re-read Calendar before confirmation so a canceled or rescheduled event cannot start a stale session.
@@ -138,8 +144,8 @@ export class StudyReminders {
           await this.audit(state.conversation,"context_changed_before_send");await this.save(state);return;
         }
       }
-      state.events[block.key]={block,startAttempted:true};
-      state.pending={key:block.key,expires:Math.min(block.end,now+10*60_000)};state.lastPrompt=now;
+      state.events[gate.kind==="place"?`place:${now}:${block.key}`:block.key]={block:{...block,start:now},startAttempted:true};
+      state.pending={key:block.key,expires:Math.min(block.end,now+10*60_000),...(gate.kind?{kind:gate.kind}:{})};state.lastPrompt=now;
       await this.save(state);
       await this.deps.send(state.conversation,gate.message??(block.kind==="open"
         ?`Your demo calendar has ${Math.floor((block.end-now)/60_000)} free minutes now. Want a ${Math.min(45,Math.floor((block.end-now)/60_000))}-minute study session? Reply yes or skip. I'll only follow up if you start.`
