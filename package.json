@@ -12,7 +12,8 @@
     "test": "python3 -m unittest test_backend.py",
     "start:node": "node --experimental-transform-types --env-file-if-exists=.env src/index.ts",
     "test:bot": "bun test tests",
-    "web:node": "node --experimental-transform-types --env-file-if-exists=.env src/web-server.ts"
+    "web:node": "node --experimental-transform-types --env-file-if-exists=.env src/web-server.ts",
+    "build:hosted": "bun scripts/build-hosted-api.ts"
   },
   "dependencies": {
     "@google-cloud/local-auth": "^3.0.1",

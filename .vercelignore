@@ -6,6 +6,7 @@
 !api/**
 !src
 !src/hosted-web.ts
+!src/hosted-entry.ts
 !src/learning-web.ts
 !src/insights.ts
 !src/learning.ts
@@ -17,3 +18,5 @@
 !bun.lock
 !tsconfig.json
 !vercel.json
+!scripts
+!scripts/build-hosted-api.ts

@@ -10,7 +10,7 @@ export async function learningDashboard(authorization:string|undefined,request:t
  try{
   const r=await request(url.origin+'/functions/v1/model-dashboard',{headers:{Authorization:authorization},cache:'no-store',redirect:'error',signal:AbortSignal.timeout(12000)});
   if(!r.ok)return reply(r.status===401?401:502,{error:r.status===401?'Dashboard code expired or disconnected. Request a new code from the bot.':'Dashboard connection is temporarily unavailable.'});
-  const data=await r.json();if(!data?.model||!Array.isArray(data.history)||!Array.isArray(data.events))throw Error();
+  const data=await r.json() as {model:unknown;history:any[];events:unknown[];insights?:unknown};if(!data?.model||!Array.isArray(data.history)||!Array.isArray(data.events))throw Error();
   if(!data.insights){
    const starter=insightObservations('0'.repeat(64),[],starterRows);
    const recent:InsightObservation[]=data.history.flatMap((h:any,i:number)=>[h.productivity,h.mood,h.distraction].every((v:any)=>Number.isInteger(v)&&v>=1&&v<=5)?[{id:'recent:'+i,place:h.place,productivity:h.productivity,mood:h.mood,distraction:h.distraction,attribution:null,synthetic:false}]:[]);
