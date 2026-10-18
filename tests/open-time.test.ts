@@ -13,7 +13,7 @@ const dirs:string[]=[];
 afterEach(async()=>{for(const d of dirs.splice(0))await rm(d,{recursive:true,force:true});});
 test("finds gaps around commitments of any title, merges overlaps, and applies buffers",()=>{
   const gaps=openWindows([{start:t("09:00"),end:t("10:00")},{start:t("09:30"),end:t("10:30")},{start:t("12:00"),end:t("13:00")}],t("08:00"),1);
-  expect(gaps.map(g=>[g.start,g.end])).toEqual([[t("10:40"),t("11:50")],[t("13:10"),t("20:00")]]);
+  expect(gaps.map(g=>[g.start,g.end])).toEqual([[t("00:00"),t("08:50")],[t("10:40"),t("11:50")],[t("13:10"),parseCalendarTime("2026-10-20 00:00")]]);
   expect(gaps.every(g=>g.kind==="open")).toBe(true);
 });
 test("all-day busy events block the day; deadlines marked free and declined invitations do not",()=>{
@@ -24,7 +24,7 @@ test("all-day busy events block the day; deadlines marked free and declined invi
 });
 test("gap identity is stable as time passes and past/short openings disappear",()=>{
   const a=openWindows([],t("10:00"),1),b=openWindows([],t("11:00"),1);
-  expect(a[0]?.key).toBe(b[0]?.key);expect(openWindows([],t("19:31"),1)).toHaveLength(0);
+  expect(a[0]?.key).toBe(b[0]?.key);expect(openWindows([],t("23:31"),1)).toHaveLength(0);
   expect(()=>openWindows([{start:NaN,end:t("12:00")}],t("08:00"))).toThrow();
 });
 test("Pacific conversions handle DST and reject invalid or ambiguous local times",()=>{

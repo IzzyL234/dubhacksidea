@@ -15,9 +15,9 @@ Text these messages in order:
 
 ## Calendar study blocks
 
-`reminders on` enables checks for gaps in Hackathon Demo, not every calendar. Eligible gaps are at least 30 minutes within 9 AM-8 PM Pacific, with 10-minute buffers. Quiet hours, session state and prompt limits still apply. A free gap is not proof of availability.
+`reminders on` enables checks for gaps in Hackathon Demo, not every calendar. Eligible gaps are at least 30 minutes at any hour, including across midnight, with 10-minute buffers. Quiet hours are off unless explicitly set. Text `quiet hours off` to disable them. Session state and prompt limits still apply. A free gap is not proof of availability.
 
-A study invitation needs `yes`. Calendar and (if enabled) location are checked again, then a linked session is created for up to 45 minutes of remaining open time. A linked end reminder asks you to text `done`; it does not automatically finish the session or invent feedback. No event is automatically booked. Place-confirmation yes only saves the place; a separate study confirmation is required. Keep one bot process running on an awake computer.
+A study invitation needs `yes`. Calendar and (if enabled) location are checked again, then a linked session is created for up to 45 minutes of remaining open time. A linked end reminder asks you to text `done`; it does not automatically finish the session or invent feedback. The invitation explicitly includes adding the accepted session to Hackathon Demo. On yes, booking is attempted and its result is reported. If booking is not confirmed, the tracked session stays active; `retry calendar` safely retries the original event without duplicates. Manual `start studying` does not book an event. Place-confirmation yes only saves the place; a separate study confirmation is required. Keep one bot process running on an awake computer.
 
 ## Natural-language distraction feedback
 

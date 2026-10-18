@@ -52,7 +52,7 @@ export async function getOpenStudyWindows(now = Date.now()): Promise<StudyBlock[
 }
 export async function getOpenTimeReply(now = Date.now()): Promise<string> {
   const windows=(await getOpenStudyWindows(now)).slice(0,6);
-  if(!windows.length)return "No 30-minute openings found in the next 7 days within 9 AM–8 PM Pacific, allowing 10-minute buffers.";
+  if(!windows.length)return "No 30-minute openings found in the next 7 days at any hour, allowing 10-minute buffers.";
   return "Open time based on Hackathon Demo only (Pacific; 10-minute buffers):\n"+windows.map(w=>{
     const start=Math.max(w.start,now);return `• ${formatTime(start)} to ${formatTime(w.end)} (${Math.floor((w.end-start)/60000)} minutes)`;
   }).join("\n")+"\nAn empty calendar slot is a suggestion, not proof you're available.";

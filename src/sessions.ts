@@ -1,3 +1,5 @@
+import {bookStudyEvent,bookingFailure,type StudyBooking} from "./study-calendar.ts";
+import type {CalendarGateway} from "./calendar-types.ts";
 import {configuredLearningStore,type StudyHistorySource,type LearningPair} from "./learning-store.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
@@ -29,7 +31,7 @@ export type PhotoLogEntry = {
   source: "perceptron";
 };
 
-type Document = { sessions: StudySession[]; replies: { id: string; text: string }[] };
+type Document = { calendarBookings?:Record<string,StudyBooking>; sessions: StudySession[]; replies: { id: string; text: string }[] };
 export interface SessionSink {
   put(session: StudySession): Promise<void>;
   putPhotoLog?(entry: PhotoLogEntry): Promise<void>;
@@ -148,8 +150,9 @@ export class StudySessions {
     const key=hash(conversation);
     return this.serialized(key,async()=> (await this.read(key)).sessions.some(s=>s.id===sessionId&&s.status==="active"));
   }
-  async startCalendar(conversation: string, eventKey: string, plannedMinutes: number): Promise<{id:string;reply:string}|null> {
+  async startCalendar(conversation: string, eventKey: string, plannedMinutes: number, booking?:{gateway:CalendarGateway;start:number;end:number}): Promise<{id:string;reply:string}|null> {
     if(!Number.isInteger(plannedMinutes)||plannedMinutes<5||plannedMinutes>240)throw new Error("Invalid calendar duration");
+    if(booking&&(!Number.isFinite(booking.start)||!Number.isFinite(booking.end)||booking.end-booking.start!==plannedMinutes*60000||booking.end<=this.now()))throw Error("Invalid booking interval");
     const key=hash(conversation), id=`cal_${hash(`${key}:${eventKey}`)}`;
     return this.serialized(key,async()=>{
       const doc=await this.read(key);
@@ -158,8 +161,32 @@ export class StudySessions {
       if(doc.sessions.some(s=>s.status==="active"||s.status==="awaiting_feedback"))return null;
       doc.sessions.push({id,user_id:key,started_at:new Date(this.now()).toISOString(),ended_at:null,duration_mins:plannedMinutes,
         location:null,study_space:null,environment:{},environment_source:null,status:"active",feedback_id:null,is_synthetic:false,starting_energy:null,starting_noise:null,starting_context_at:null});
-      await this.save(key,doc);
-      return {id,reply:`Started your calendar study session (${plannedMinutes} planned minutes). Reply with your place and seat, for example library desk, then send a workspace photo or text workspace bright 3 7. Optional within the first 5 minutes: starting context 3 quiet (energy 1-5; noise quiet/moderate/loud/unknown). Text done when finished.`};
+      if(booking){doc.calendarBookings??={};doc.calendarBookings[id]={start:booking.start,end:booking.end,status:"pending"};}
+      await this.save(key,doc); // Preserve the session and exact booking interval before any Calendar write.
+      let calendarReply="";
+      if(booking){
+        try{
+          const eventId=await bookStudyEvent(booking.gateway,id,doc.calendarBookings![id]!);
+          doc.calendarBookings![id] = {...doc.calendarBookings![id]!,status:"booked",eventId};
+          await this.save(key,doc);calendarReply=" Added it to Hackathon Demo.";
+        }catch(error){calendarReply=" Your tracked session is running, but the calendar booking was not confirmed. "+bookingFailure(error);}
+      }
+      return {id,reply:`Started your calendar study session (${plannedMinutes} planned minutes).${calendarReply} Reply with your place and seat, for example library desk, then send a workspace photo or text workspace bright 3 7. Optional within the first 5 minutes: starting context 3 quiet (energy 1-5; noise quiet/moderate/loud/unknown). Text done when finished.`};
+    });
+  }
+  async retryCalendar(conversation:string,gateway:CalendarGateway):Promise<string>{
+    const key=hash(conversation);
+    return this.serialized(key,async()=>{
+      const doc=await this.read(key),session=doc.sessions.find(s=>s.status==="active");
+      const plan=session&&doc.calendarBookings?.[session.id];
+      if(!session||!plan)return "No active study session has a calendar booking to retry.";
+      if(plan.status==="booked")return "This study session is already added to Hackathon Demo. No duplicate was created.";
+      if(plan.end<=this.now())return "That planned study block has ended. I won't add a past event. Text done for your check-in.";
+      try{
+        const eventId=await bookStudyEvent(gateway,session.id,plan);
+        doc.calendarBookings![session.id]={...plan,status:"booked",eventId};await this.save(key,doc);
+        return "Your study session is added to Hackathon Demo. The original session time was kept; no duplicate was created.";
+      }catch(error){return "Your tracked study session is still running. "+bookingFailure(error);}
     });
   }
   private async appendPhotoLog(entry: PhotoLogEntry) {
@@ -368,3 +395,4 @@ export class StudySessions {
   }
 
 }
+

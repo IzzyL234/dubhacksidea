@@ -56,7 +56,7 @@ test("quiet hours use Pacific time through DST and suppress both polling and pro
   expect(isQuiet(Date.parse("2026-10-18T05:00:00Z"),22,8)).toBe(true); // 10 PM PDT
   expect(isQuiet(Date.parse("2026-12-18T06:00:00Z"),22,8)).toBe(true); // 10 PM PST
   expect(isQuiet(noon,22,8)).toBe(false);
-  const s=await setup();await s.reminders.handle("a","reminders on","on");s.time(Date.parse("2026-10-18T05:00:00Z"));await s.reminders.tick();expect(s.reads).toBe(0);
+  const s=await setup();await s.reminders.handle("a","reminders on","on");await s.reminders.handle("a","quiet hours 22 8","night-hours");s.time(Date.parse("2026-10-18T05:00:00Z"));await s.reminders.tick();expect(s.reads).toBe(0);
   expect(await s.reminders.handle("a","quiet hours 9 17","hours")).toContain("9:00");s.time(noon);await s.reminders.tick();expect(s.reads).toBe(0);
   expect(await s.reminders.handle("a","quiet hours 8 08","invalid")).toContain("different hours");
 });

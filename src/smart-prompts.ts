@@ -189,7 +189,7 @@ export class SmartPrompts {
       catch{return quiet("model_unavailable_or_invalid",facts);}
       if(decision.action!=="offer_study"||decision.confidence<0.75)return quiet(`model_${decision.reason}`,facts);
       state.offer={key:block.key,place:presence.place.id??presence.place.label,expires:this.now()+10*60000};const audit=this.log(state,"offer_study",decision.reason,presence.place.label,facts);state.offer.decisionId=audit.id;await this.save(key,state);
-      return {allow:true,reason:decision.reason,message:`You've stayed near your saved ${presence.place.label.replaceAll("_"," ")} spot and your demo calendar has ${freeMinutes} free minutes. Want a ${Math.min(45,freeMinutes)}-minute study session? Reply yes or skip.`};
+      return {allow:true,reason:decision.reason,message:`You've stayed near your saved ${presence.place.label.replaceAll("_"," ")} spot and your demo calendar has ${freeMinutes} free minutes. Want to start a ${Math.min(45,freeMinutes)}-minute study session and add it to Hackathon Demo? Reply yes or skip.`};
     });
   }
   async confirm(conversation:string,block:StudyBlock):Promise<boolean>{

@@ -6,7 +6,7 @@ import type { StudyBlock } from "./study-events.ts";
 
 type Delivery = { block: StudyBlock; startAttempted?: boolean; sessionId?: string; endAttempted?: boolean };
 type State = {
-  conversation?: string; enabled: boolean; quietStart: number; quietEnd: number;
+  conversation?: string; enabled: boolean; quietEnabled?:boolean; quietStart: number; quietEnd: number;
   events: Record<string,Delivery>; pending?: {key:string;expires:number;kind?:"place"}; lastPrompt?:number; snoozeUntil?:number;
   replies:{id:string;conversation:string;reply:string}[];
 };
@@ -39,7 +39,7 @@ export class StudyReminders {
   }
   private async read():Promise<State>{
     try{return JSON.parse(await readFile(this.path,"utf8"));}
-    catch(e){if((e as NodeJS.ErrnoException).code==="ENOENT")return {enabled:false,quietStart:22,quietEnd:8,events:{},replies:[]};throw e;}
+    catch(e){if((e as NodeJS.ErrnoException).code==="ENOENT")return {enabled:false,quietEnabled:false,quietStart:22,quietEnd:8,events:{},replies:[]};throw e;}
   }
   private async save(state:State){
     await mkdir(dirname(this.path),{recursive:true});const tmp=`${this.path}.${randomUUID()}.tmp`;
@@ -61,19 +61,20 @@ export class StudyReminders {
         else{
           if(!owner){state.events={};delete state.pending;delete state.lastPrompt;}
           state.conversation=conversation;state.enabled=true;
-          reply=`Open-time suggestions are on for this chat. I look for 30+ free minutes between Hackathon Demo commitments, within 9 AM–8 PM Pacific with 10-minute buffers. Quiet hours: ${state.quietStart}:00–${state.quietEnd}:00 Pacific. Keep the bot running. Text reminders off to stop.`;
+          reply=`Open-time suggestions are on for this chat. I look for 30+ free minutes between Hackathon Demo commitments, at any hour with 10-minute buffers. Quiet hours: ${state.quietEnabled===true?`${state.quietStart}:00–${state.quietEnd}:00 Pacific`:"off"}. Keep the bot running. Text reminders off to stop.`;
         }
       }else if(command==="reminders off"){
         if(owner){state.enabled=false;delete state.pending;reply="Study reminders are off.";}
         else reply="Study reminders aren't connected to this chat.";
       }else if(command==="reminders status")reply=state.enabled&&owner
-        ?`Study reminders are on. Quiet hours ${state.quietStart}:00–${state.quietEnd}:00 Pacific. Polling every minute while the bot runs.`
+        ?`Study reminders are on. Quiet hours: ${state.quietEnabled===true?`${state.quietStart}:00–${state.quietEnd}:00 Pacific`:"off"}. Polling every minute while the bot runs.`
         :"Study reminders are off for this chat. Text reminders on to connect the demo calendar.";
       else if(command.startsWith("quiet hours")){
         const hours=command.match(/^quiet hours (\d{1,2}) (\d{1,2})$/);
         if(!owner)reply="Text reminders on first.";
+        else if(command==="quiet hours off"){state.quietEnabled=false;reply="Quiet hours are off. Study suggestions can happen at any hour, subject to calendar availability and prompt limits.";}
         else if(!hours||Number(hours[1])>23||Number(hours[2])>23||hours[1]===hours[2]||Number(hours[1])===Number(hours[2]))reply="Use quiet hours 22 8 (24-hour start and end, different hours from 0–23).";
-        else{state.quietStart=Number(hours[1]);state.quietEnd=Number(hours[2]);reply=`Quiet hours set to ${state.quietStart}:00–${state.quietEnd}:00 Pacific.`;}
+        else{state.quietEnabled=true;state.quietStart=Number(hours[1]);state.quietEnd=Number(hours[2]);reply=`Quiet hours set to ${state.quietStart}:00–${state.quietEnd}:00 Pacific.`;}
       }else if(state.enabled&&owner&&state.pending){
         // "skip" can also be an answer in the existing distraction-source check-in.
         if(await this.deps.checkIn(conversation))return null;
@@ -111,7 +112,7 @@ export class StudyReminders {
     return this.serialized(async()=>{
       const state=await this.read();if(!state.enabled||!state.conversation)return;
       const now=this.now();
-      if(isQuiet(now,state.quietStart,state.quietEnd)){await this.audit(state.conversation,"quiet_hours");return;}
+      if(state.quietEnabled===true&&isQuiet(now,state.quietStart,state.quietEnd)){await this.audit(state.conversation,"quiet_hours");return;}
       if(state.pending&&state.pending.expires<now)delete state.pending;
       // Building recognition is independent of Calendar and never starts a study session.
       if(this.deps.observe&&!state.pending&&!await this.deps.busy(state.conversation)&&now>=(state.snoozeUntil??0)
@@ -120,7 +121,7 @@ export class StudyReminders {
         const count=Object.values(state.events).filter(d=>d.startAttempted&&new Date(d.block.start).toLocaleDateString("en-CA",{timeZone:"America/Los_Angeles"})===day).length;
         if(count<2){
           const gate=await this.deps.observe(state.conversation);
-          if(gate.allow&&gate.kind==="place"&&gate.message&&!isQuiet(this.now(),state.quietStart,state.quietEnd)&&!await this.deps.busy(state.conversation)){
+          if(gate.allow&&gate.kind==="place"&&gate.message&&!(state.quietEnabled===true&&isQuiet(this.now(),state.quietStart,state.quietEnd))&&!await this.deps.busy(state.conversation)){
             const key=`place:${now}`,block:StudyBlock={key,title:"Place confirmation",start:now,end:now+10*60_000};
             state.events[key]={block,startAttempted:true};state.pending={key,expires:block.end,kind:"place"};state.lastPrompt=now;
             await this.save(state);await this.deps.send(state.conversation,gate.message);return;
@@ -156,7 +157,7 @@ export class StudyReminders {
       if(!gate.allow){await this.save(state);return;}
       if(this.deps.evaluate){
         const fresh=(await this.deps.events(this.now())).find(b=>b.key===block.key);
-        if(!fresh||fresh.end-this.now()<30*60_000||await this.deps.busy(state.conversation)||isQuiet(this.now(),state.quietStart,state.quietEnd)){
+        if(!fresh||fresh.end-this.now()<30*60_000||await this.deps.busy(state.conversation)||(state.quietEnabled===true&&isQuiet(this.now(),state.quietStart,state.quietEnd))){
           await this.audit(state.conversation,"context_changed_before_send");await this.save(state);return;
         }
       }
@@ -164,8 +165,8 @@ export class StudyReminders {
       state.pending={key:block.key,expires:Math.min(block.end,now+10*60_000),...(gate.kind?{kind:gate.kind}:{})};state.lastPrompt=now;
       await this.save(state);
       await this.deps.send(state.conversation,gate.message??(block.kind==="open"
-        ?`Your demo calendar has ${Math.floor((block.end-now)/60_000)} free minutes now. Want a ${Math.min(45,Math.floor((block.end-now)/60_000))}-minute study session? Reply yes or skip. I'll only follow up if you start.`
-        :`Ready for your calendar block “${block.title}”? Reply yes to start a study session, or skip. I'll only follow up if you start.`));
+        ?`Your demo calendar has ${Math.floor((block.end-now)/60_000)} free minutes now. Want to start a ${Math.min(45,Math.floor((block.end-now)/60_000))}-minute study session and add it to Hackathon Demo? Reply yes or skip. I'll only follow up if you start.`
+        :`Ready for your calendar block “${block.title}”? Reply yes to start a study session and add it to Hackathon Demo, or skip. I'll only follow up if you start.`));
     });
   }
 }
