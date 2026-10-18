@@ -20,7 +20,7 @@ import {createHash as traceHash,randomUUID as traceUUID} from "node:crypto";
 import {SessionContext} from "./session-context.ts";
 import {MessageDelivery} from "./message-delivery.ts";
 import {interpretCalendar} from "./calendar-language.ts";
-import {generateText,textProvider} from "./text-model.ts";
+import {generateText,textProvider,textModelFailureReply} from "./text-model.ts";
 import {GeminiHttpError,type Turn} from "./gemini.ts";
 import {configuredEventSink} from "./proactivity-store.ts";
 import {lookupCampusBuildings} from "./uw-buildings.ts";
@@ -383,9 +383,9 @@ async function handleEnvelope(space:BotInboxItem[0],envelope:BotInboxItem[1]) {
       void pollStudyReminders();
       continue;
     }
-  } catch {
-    console.error("Feedback could not be processed or delivered. No credentials were logged.");
-    try { await space.send("I couldn't finish that check-in just now. Please try again, or text cancel to stop."); }
+  } catch (error) {
+    console.error("Request processing failed",JSON.stringify({name:error instanceof Error?error.name:"Unknown",status:(error as {status?:number})?.status}));
+    try { await space.send(textModelFailureReply(error)??"I couldn't finish that request just now. Please try again, or text cancel to stop."); }
     catch { console.error("Could not send the feedback error message."); }
     continue;
   }

@@ -3,7 +3,7 @@ import {mkdir,readFile,writeFile,rename,readdir} from 'node:fs/promises';
 import {configuredAgentRunSink,type AgentRunSink} from './agent-run-cloud.ts';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {generateText} from './text-model.ts';
+import {generateText,textModelFailureReply} from './text-model.ts';
 import {formatTime} from './time.ts';
 
 export type AgentTool='calendar'|'openings'|'learning'|'notes';
@@ -125,7 +125,7 @@ export class ConversationAgent{
     return finish({reply:d.reply},d.kind);
    }
    return finish({reply:'I reached my planning limit before finding a complete answer. Could we focus on one thing: a study opening, a calendar conflict, or your study patterns?'},'budget');
-  }catch(error){if(abort.signal.aborted)return {cancelled:true};const status=(error as {status?:number}).status;const name=error instanceof Error?error.name:'Unknown';console.error('[agent] planning_failed',JSON.stringify({name,status:Number.isInteger(status)?status:undefined,completedTools:run.tools.length}));const reply=status===402?'The AI provider is rejecting requests because its billing or credit balance needs attention. Calendar has not been changed.':name==='TimeoutError'?'The AI provider took too long to answer. Please try again; your calendar has not been changed.':'I could not finish that planning request just now. Your calendar has not been changed.';return finish({reply},'failed');}
+  }catch(error){if(abort.signal.aborted)return {cancelled:true};const status=(error as {status?:number}).status;const name=error instanceof Error?error.name:'Unknown';console.error('[agent] planning_failed',JSON.stringify({name,status:Number.isInteger(status)?status:undefined,completedTools:run.tools.length}));const reply=textModelFailureReply(error)??(status===402?'The AI provider is rejecting requests because its billing or credit balance needs attention. Calendar has not been changed.':name==='TimeoutError'?'The AI provider took too long to answer. Please try again; your calendar has not been changed.':'I could not finish that planning request just now. Your calendar has not been changed.');return finish({reply},'failed');}
   finally{clearTimeout(timer);if(this.running.get(chat)===abort)this.running.delete(chat);}
  });}
 }
