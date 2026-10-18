@@ -1,0 +1,3 @@
+[functions.owntracks]
+# OwnTracks uses HTTP Basic auth; handler.ts verifies it before processing data.
+verify_jwt = false
