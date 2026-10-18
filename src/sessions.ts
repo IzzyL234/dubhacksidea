@@ -215,7 +215,7 @@ export class StudySessions {
   async retryCalendar(conversation:string,gateway:CalendarGateway):Promise<string>{
     const key=hash(conversation);
     return this.serialized(key,async()=>{
-      const doc=await this.read(key),session=doc.sessions.find(s=>s.status==="active")??[...doc.sessions].reverse().find(s=>doc.calendarBookings?.[s.id]?.completed);
+      const doc=await this.read(key),session=doc.sessions.find(s=>s.status==="active"&&doc.calendarBookings?.[s.id])??[...doc.sessions].reverse().find(s=>s.status!=="canceled"&&doc.calendarBookings?.[s.id]?.completed&&doc.calendarBookings[s.id]!.status==="pending")??[...doc.sessions].reverse().find(s=>s.status!=="canceled"&&doc.calendarBookings?.[s.id]?.completed);
       const plan=session&&doc.calendarBookings?.[session.id];
       if(!session||!plan)return "No active study session has a calendar booking to retry.";
       if(plan.status==="booked")return "This study session is already added to Hackathon Demo. No duplicate was created.";
