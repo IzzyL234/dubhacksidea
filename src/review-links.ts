@@ -19,11 +19,28 @@ export async function withReviewLock<T>(directory:string,work:()=>Promise<T>):Pr
 type ReviewState={conversation:string;reviews:ScheduleReview[];reviewLinks?:Record<string,string>;[key:string]:unknown};
 const digest=(value:string)=>createHash('sha256').update(value).digest();
 export class ReviewLinks{
- constructor(private gateway:CalendarGateway,private directory:string,private now=Date.now){}
+ constructor(private gateway:CalendarGateway,private directory:string,private now=Date.now,private upload?: (owner:string,review:ScheduleReview)=>Promise<void>){}
+ async sync(){
+  if(!this.upload)return {uploaded:0,pending:0};
+  const rows=await withReviewLock(this.directory,async()=>{
+   const rows:{owner:string;review:ScheduleReview}[]=[];
+   for(const file of await readdir(this.directory)){
+    if(!/^[a-f0-9]{64}\.json$/.test(file))continue;
+    const state=JSON.parse(await readFile(join(this.directory,file),'utf8')) as ReviewState;
+    if(digest(state.conversation).toString('hex')+'.json'!==file)continue;
+    for(const review of state.reviews)rows.push({owner:file.slice(0,-5),review});
+   }
+   return rows;
+  });
+  let uploaded=0,pending=0;
+  for(const row of rows){try{await this.upload(row.owner,row.review);uploaded++;}catch{pending++;}}
+  return {uploaded,pending};
+ }
  async request(id:string,token:string,action?:'approve'|'deny'):Promise<Response>{
   const reply=(status:number,value:unknown)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json','Cache-Control':'private, no-store','Referrer-Policy':'no-referrer'}});
   if(!/^[a-f0-9]{16}$/.test(id)||!/^Bearer [A-Za-z0-9_-]{43}$/.test(token))return reply(401,{error:'Open the private review link from your bot message.'});
-  try{return await withReviewLock(this.directory,async()=>{
+  let changed:{owner:string;review:ScheduleReview}|undefined;
+  try{const response=await withReviewLock(this.directory,async()=>{
    const files=await readdir(this.directory);
    for(const file of files){
     if(!/^[a-f0-9]{64}\.json$/.test(file))continue;
@@ -35,10 +52,16 @@ export class ReviewLinks{
     if(action&&review.status==='pending'){
      review.status=action==='deny'?'skipped':await applyScheduleReview(this.gateway,review,this.now());
      const path=join(this.directory,file),temp=path+'.'+randomUUID()+'.tmp';await writeFile(temp,JSON.stringify(state),{mode:0o600});await rename(temp,path);
+     changed={owner:file.slice(0,-5),review};
     }
     return reply(200,{review:publicScheduleReview(review)});
    }
    return reply(401,{error:'Review link unavailable. Request a fresh review from your bot.'});
-  });}catch{return reply(503,{error:'Could not confirm the review. Retry the same link; the event version is checked before changing anything.'});}
+  });
+   // Calendar execution and its local receipt are already committed. A failed
+   // dashboard upload must not turn a successful approval into an error.
+   if(changed&&this.upload)await this.upload(changed.owner,changed.review).catch(()=>{});
+   return response;
+  }catch{return reply(503,{error:'Could not confirm the review. Retry the same link; the event version is checked before changing anything.'});}
  }
 }

@@ -3,9 +3,13 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {ReviewLinks} from './review-links.ts';
 import {demoCalendar} from './calendar-api.ts';
+import {configuredReviewUpload} from './schedule-review-service.ts';
 // Put only this capability-protected worker behind HTTPS for hosted reviews.
 // The full local web server includes development/OAuth routes and stays local.
-const reviews=new ReviewLinks(demoCalendar,process.env.SCHEDULE_REVIEW_DIRECTORY??join(fileURLToPath(new URL('..',import.meta.url)),'data','schedule-reviews'));
+const reviews=new ReviewLinks(demoCalendar,process.env.SCHEDULE_REVIEW_DIRECTORY??join(fileURLToPath(new URL('..',import.meta.url)),'data','schedule-reviews'),Date.now,configuredReviewUpload());
+let syncing=false;
+async function syncReviews(){if(syncing)return;syncing=true;try{const r=await reviews.sync();if(r.pending)console.error('Review dashboard sync queued; local approval receipts are preserved.');}catch{console.error('Review dashboard sync will retry.');}finally{syncing=false;}}
+void syncReviews();setInterval(()=>void syncReviews(),60000).unref();
 export const reviewWorker=createServer(async(req,res)=>{
  const path=new URL(req.url??'/', 'http://worker.local').pathname,match=path.match(/^\/api\/learning\/reviews\/([a-f0-9]{16})(?:\/(approve|deny))?$/),method=req.method??'GET';
  let response:Response;

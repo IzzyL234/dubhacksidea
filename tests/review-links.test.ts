@@ -34,3 +34,9 @@ test('calendar changed after link generation invalidates approval',async()=>{
  const f=await fixture();f.events[0]!.etag='changed';const api=new ReviewLinks(f.gateway,f.directory,f.now);
  expect((await (await api.request(f.id,'Bearer '+f.key,'approve')).json()).review.status).toBe('stale');expect(f.patches).toBe(0);
 });
+test('web approvals upload their saved receipt immediately and cloud failure retries without another edit',async()=>{
+ const f=await fixture();let fail=true;const uploaded:string[]=[];
+ const api=new ReviewLinks(f.gateway,f.directory,f.now,async(owner,review)=>{expect(owner).toMatch(/^[a-f0-9]{64}$/);if(fail)throw Error('offline');uploaded.push(review.status);});
+ const result=await api.request(f.id,'Bearer '+f.key,'approve');expect(result.status).toBe(200);expect((await result.json()).review.status).toBe('applied');expect(f.patches).toBe(1);
+ fail=false;expect(await api.sync()).toEqual({uploaded:1,pending:0});expect(uploaded).toEqual(['applied']);expect(f.patches).toBe(1);
+});

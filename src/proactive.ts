@@ -48,6 +48,7 @@ export class StudyReminders {
     await mkdir(dirname(this.path),{recursive:true});const tmp=`${this.path}.${randomUUID()}.tmp`;
     await writeFile(tmp,JSON.stringify(state),{mode:0o600});await rename(tmp,this.path);
   }
+  async notificationRecipient():Promise<string|null>{return this.serialized(async()=>{const s=await this.read();return s.enabled&&s.conversation?s.conversation:null;});}
   async enabledFor(conversation:string):Promise<boolean>{return this.serialized(async()=>{const s=await this.read();return s.enabled&&s.conversation===conversation;});}
   async notificationAllowedFor(conversation:string):Promise<boolean>{return this.serialized(async()=>{const s=await this.read();return s.enabled&&s.conversation===conversation&&!(s.quietEnabled&&isQuiet(this.now(),s.quietStart,s.quietEnd))&&!(s.snoozeUntil&&s.snoozeUntil>this.now());});}
   private async audit(conversation:string,reason:string){try{await this.deps.audit?.(conversation,reason);}catch{}}

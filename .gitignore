@@ -41,3 +41,9 @@ data/schedule-reviews/
 data/insights/
 
 .vercel/
+
+.vercel
+
+data/agent-turns/
+
+data/daily-brief/

@@ -1,3 +1,8 @@
+import {InboxRecovery,photonInboxList} from "./inbox-recovery.ts";
+import {DailyBrief} from "./daily-brief.ts";
+import {ConversationAgent} from "./conversation-agent.ts";
+import {createAgentTools} from "./agent-tools.ts";
+import {ConversationQueue} from "./conversation-queue.ts";
 import {configuredDashboardAccess} from "./dashboard-access.ts";
 import {dashboardCommand} from "./dashboard-command.ts";
 import {InsightsPublisher} from "./insights-publisher.ts";
@@ -108,12 +113,19 @@ const reminders = new StudyReminders({
   outcome:(c,k)=>smartPrompts.outcome(c,k),
   events: now => getOpenStudyWindows(now),
   send: async (conversation, text) => { const space = await messaging.space.get(conversation); await space.send(text); },
-  busy: async conversation => await studySessions.hasUnfinished(conversation) || await feedbackFlow.hasDraft(conversation),
+  busy: async conversation => await studySessions.hasUnfinished(conversation) || await feedbackFlow.hasDraft(conversation) || await conversationAgent.hasPending(conversation),
   start: (conversation, block) => studySessions.startCalendar(conversation, block.key, (block.end-block.start)/60_000,{gateway:demoCalendar,start:block.start,end:block.end}),
   active: (conversation, id) => studySessions.isActive(conversation, id),
   checkIn: conversation => feedbackFlow.hasDraft(conversation),
 });
-const scheduleReviews=new ScheduleReviewService({gateway:demoCalendar,reviewUrl:(process.env.FRONTEND_URL??"http://localhost:3000").replace(/\/+$/,"")+"/dashboard",upload:configuredReviewUpload(),connected:c=>reminders.enabledFor(c),allowed:async c=>await reminders.notificationAllowedFor(c)&&!await studySessions.hasUnfinished(c)&&!await feedbackFlow.hasDraft(c),estimate:(c,start,lengths)=>studySessions.timeEstimates(c,start,lengths),send:async(c,text)=>{const space=await messaging.space.get(c);await space.send(text);}});
+const scheduleReviews=new ScheduleReviewService({gateway:demoCalendar,reviewUrl:(process.env.FRONTEND_URL??"http://localhost:3000").replace(/\/+$/,"")+"/dashboard",upload:configuredReviewUpload(),connected:c=>reminders.enabledFor(c),allowed:async c=>await reminders.notificationAllowedFor(c)&&!await studySessions.hasUnfinished(c)&&!await feedbackFlow.hasDraft(c)&&!await conversationAgent.hasPending(c),estimate:(c,start,lengths)=>studySessions.timeEstimates(c,start,lengths),send:async(c,text)=>{const space=await messaging.space.get(c);await space.send(text);}});
+const agentTools=createAgentTools({calendar:demoCalendar,openings:getOpenStudyWindows,estimate:(c,start,lengths)=>studySessions.timeEstimates(c,start,lengths),learning:c=>studySessions.proactiveOptions(c,"unknown",60),notes:c=>sessionContext.summary(c)});
+const conversationAgent=new ConversationAgent({tool:agentTools.read,book:agentTools.book,session:c=>studySessions.chatContext(c)});
+const conversationQueue=new ConversationQueue();
+const dailyBrief=new DailyBrief({calendar:demoCalendar,recipient:()=>reminders.notificationRecipient(),allowed:c=>reminders.notificationAllowedFor(c),busy:async c=>await feedbackFlow.hasDraft(c)||await conversationAgent.hasPending(c),send:async(c,text)=>{const space=await messaging.space.get(c);await space.send(text);},opportunity:async(c,date)=>{const data=await agentTools.read(c,"openings",{date,notBefore:null,minutes:30}) as {options?:{start:number;end:number}[]};const first=data.options?.[0];if(!first)return null;return "There is a 30-minute study opening at "+new Date(first.start).toLocaleTimeString("en-US",{timeZone:"America/Los_Angeles",hour:"numeric",minute:"2-digit"})+" Pacific. Ask me to plan a study block if you would like to use it.";}});
+let dailyTickRunning=false;
+async function pollDailyBrief(){if(dailyTickRunning)return;dailyTickRunning=true;try{await dailyBrief.tick();}catch{console.error("Daily brief or event check-in deferred; calendar and delivery will be checked again.");}finally{dailyTickRunning=false;}}
+void pollDailyBrief();setInterval(()=>void pollDailyBrief(),30000).unref();
 let reviewTickRunning=false;
 async function pollScheduleReviews(){if(reviewTickRunning)return;reviewTickRunning=true;try{await scheduleReviews.tick();}catch{console.error("Schedule review deferred; check calendar connection and migration 012.");}finally{reviewTickRunning=false;}}
 void pollScheduleReviews();
@@ -137,6 +149,7 @@ async function retryFeedbackSync() {
     catch { console.error("Session cloud sync deferred. Local sessions are kept; check the session migration."); }
     try {await smartPrompts.syncPending();}catch{console.error("Proactivity events queued; check Supabase migration 006 and connection.");}
     try{const rebuilt=await studySessions.rebuildDaily();if(rebuilt.rebuilt)console.log(`Rebuilt ${rebuilt.rebuilt} personal model(s) from saved history.`);}catch{console.error("Model consistency rebuild will retry; saved feedback is preserved.");}
+    try{const agentSync=await conversationAgent.flush();if(agentSync.pending)console.error("Agent traces queued; check migration 015.");}catch{console.error("Agent trace sync will retry.");}
     const result = await feedbackFlow.syncPending();
     if (result.synced) console.log(`Uploaded ${result.synced} pending feedback check-in(s).`);
     try{const contextSync=await sessionContext.flush();if(contextSync.pending)console.error('Confirmed session context queued; check migration 014 and Supabase connection.');}
@@ -169,7 +182,9 @@ The bot reads upcoming events with "calendar"; "calendar events" shows numbered 
 Shared Find My location is available only through separate explicit handlers. For a shared-location trial, tell the user to text location. Never infer their current location from conversation or claim GPS access. For an actual shared Find My snapshot check, tell the user to text live location status; a separate handler calls Photon. Text "smart prompts on" to enable smart suggestions and UW Seattle building discovery.
 `;
 
-for await (const [space, envelope] of app.messages) {
+type InboxItem<T> = T extends AsyncIterable<infer U> ? U : never;
+type BotInboxItem = InboxItem<typeof app.messages>;
+async function handleEnvelope(space:BotInboxItem[0],envelope:BotInboxItem[1]) {
   for (const message of inboundMessages(envelope)) {
   if (message.direction === "outbound") continue;
   const claimed=await messageDelivery.claim(space.id,message.id);
@@ -233,6 +248,10 @@ for await (const [space, envelope] of app.messages) {
   if (!incoming) continue;
 
   try {
+    const dailyReply=await dailyBrief.handle(space.id,incoming);if(dailyReply!==null){await space.send(dailyReply);continue;}
+    const resolvedAgent=await conversationAgent.resolve(space.id,incoming,message.id);
+    if(resolvedAgent?.route)incoming=resolvedAgent.route;
+    else if(resolvedAgent?.reply){await space.send(resolvedAgent.reply);continue;}
     const dashboardReply=await dashboardCommand(dashboardAccess,space.id,incoming,message.id);
     if(dashboardReply!==null){await space.send(dashboardReply);continue;}
     const scheduleReply=await scheduleReviews.handle(space.id,incoming);
@@ -288,11 +307,7 @@ for await (const [space, envelope] of app.messages) {
     if(incoming.toLowerCase()==="retry calendar"){
       await space.send(await studySessions.retryCalendar(space.id,demoCalendar));continue;
     }
-    if(isStudyTimeRequest(incoming)){
-      try{await space.send(await studyTimeReply(incoming,await getOpenStudyWindows(),(start,lengths)=>studySessions.timeEstimates(space.id,start,lengths)));}
-      catch{await space.send("I couldn’t read your calendar openings just now. Please try again shortly; I haven’t booked anything.");}
-      continue;
-    }
+
     if(isStudyRecommendation(incoming)){const recommendation=await studySessions.handle(space.id,incoming,message.id);if(recommendation){await space.send(recommendation);continue;}}
     const extraReply=await sessionContext.handle(space.id,incoming,message.id);
     if(extraReply!==null){await space.send(extraReply);void pollStudyReminders();continue;}
@@ -336,6 +351,15 @@ for await (const [space, envelope] of app.messages) {
         void pollStudyReminders();
         continue;
       }
+    }
+    if(!/^(calendar events|calendar help|add event(?:\s|$)|move event(?:\s|$)|rename event(?:\s|$)|reset$)/i.test(incoming)&&!isUpcomingRequest(incoming)){
+      const answer=await conversationAgent.run(space.id,incoming,message.id);
+      if(answer?.cancelled)continue;
+      if(answer?.route){
+        const reply=answer.route==="dashboard code"?await dashboardCommand(dashboardAccess,space.id,answer.route,message.id):await scheduleReviews.handle(space.id,answer.route);
+        if(reply!==null){await space.send(reply);continue;}
+      }
+      if(answer?.reply){await space.send(answer.reply);if(answer.offerId)await conversationAgent.presented(space.id,answer.offerId);continue;}
     }
     // Agentic Calendar Planner: natural-language schedule building, moving blocks, splitting sessions, or changing deadlines
     if (isAgenticProposalIntent(incoming)) {
@@ -404,4 +428,14 @@ for await (const [space, envelope] of app.messages) {
     }
   }
 }
+}
+
+console.log("[delivery] awaiting_inbound",JSON.stringify({run:runTag}));
+const inboxRecovery=new InboxRecovery({recipient:()=>reminders.notificationRecipient(),list:photonInboxList(),deliver:async(chat,id)=>{const space=await messaging.space.get(chat);const envelope=await space.getMessage(id);if(!envelope)throw Error("Message hydration unavailable");if(inboundMessages(envelope).some(m=>m.content.type==="text"))conversationAgent.cancel(space.id);void conversationQueue.enqueue(space.id,()=>handleEnvelope(space,envelope as BotInboxItem[1])).catch(()=>console.error("Recovered message processing failed; no content logged."));}});
+let lastRecoveryError=0;
+async function recoverInbox(){try{await inboxRecovery.tick();}catch{if(Date.now()-lastRecoveryError>300000){lastRecoveryError=Date.now();console.error("Backup inbox check unavailable; live inbox remains enabled.");}}}
+void recoverInbox();setInterval(()=>void recoverInbox(),8000).unref();
+for await(const [space,envelope] of messaging.messages){
+  if(inboundMessages(envelope).some(m=>m.content.type==="text"))conversationAgent.cancel(space.id);
+  void conversationQueue.enqueue(space.id,()=>handleEnvelope(space,envelope)).catch(()=>console.error("Conversation processing failed; no content or credentials logged."));
 }
