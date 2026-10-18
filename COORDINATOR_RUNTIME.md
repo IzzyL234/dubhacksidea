@@ -11,3 +11,5 @@ Decisions receive real LinUCB outcomes and uncertainty, confirmed optional conte
 There is a one-minute minimum between model reviews, at most 48 reviews per Pacific day, and at most six proactive invitations/check-ins per day. Notifications retain a ten-minute cooldown, skip snooze, quiet-hour preferences and duplicate-delivery protection. API failures back off exponentially; a Gemini 429 respects a reported retry delay or waits an hour. Restarting does not erase these limits.
 
 All text-model features use `AI_PROVIDER`, default `xai`. xAI uses `XAI_API_KEY` and optional `XAI_MODEL` (default `grok-4.7`). Selecting `AI_PROVIDER=gemini` uses the existing Gemini key and optional model. Provider fallback is explicit, never automatic. Perceptron remains the photo extractor. No fine-tuning is performed; personalization comes from recorded history, confirmed context and LinUCB updates.
+
+The production learner now combines equal-base-weight demo and real feedback, updates after saved ratings and rebuilds daily while running. Partial context is represented explicitly. See `CONTINUOUS_LEARNING.md`; demo counts are not personal evidence.

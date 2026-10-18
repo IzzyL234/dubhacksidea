@@ -62,7 +62,7 @@ console.log(`📡 Perceptron + LinUCB Backend URL: ${BACKEND_URL}`);
 const latestPhotoSessionByUser = new Map();
 
 // Initialize shared StudySessions & FeedbackFlow for training the per-user LinUCB model
-const studySessions = new StudySessions();
+const studySessions = new StudySessions().enableDemoPrior();
 const feedbackFlow = new FeedbackFlow(undefined, undefined, {
   begin: (key) => studySessions.beginFeedback(key),
   afterSave: async (record) => {
