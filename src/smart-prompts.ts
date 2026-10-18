@@ -1,3 +1,4 @@
+import type {LearningSummary} from "./study-options.ts";
 import {readdir} from "node:fs/promises";
 import type {EventSink} from "./proactivity-store.ts";
 import {locationFailureReply,locationFailureKind} from "./photon-location.ts";
@@ -10,18 +11,18 @@ import { fileURLToPath } from "node:url";
 import { localDate,formatTime } from "./time.ts";
 import type { LocationSnapshot } from "./photon-location.ts";
 import type { StudyBlock } from "./study-events.ts";
-import { validateDecision,type DecisionFacts,type PromptDecision } from "./proactive-decision.ts";
+import { validateDecision,validateSelectedOption,coordinatorProvider,type DecisionFacts,type PromptDecision } from "./proactive-decision.ts";
 
 const labels=["library","cafe","home","dorm_room","classroom","campus_building"] as const;
 type Label=typeof labels[number];
 type Place={id?:string;name?:string;label:Label;latitude:number;longitude:number;radius:number};
 type Audit={id?:string;context?:DecisionFacts;relatedDecisionId?:string;at:number;action:"stay_quiet"|"offer_study"|"offer_place"|"accepted"|"skipped";reason:string;count:number;place?:Label};
 type State={pendingEvents?:Record<string,Audit>;discovery?:boolean;lookupAfter?:number;lookupDay?:string;lookupCount?:number;candidate?:{place:NearbyPlace;expires:number};dismissed?:string[];enabled:boolean;address?:string;places:Place[];audit:Audit[];outcomes:{at:number;kind:"accepted"|"skipped"}[];
-  reviewAfter?:number;modelDay?:string;modelCalls?:number;offer?:{key:string;place:string;expires:number;decisionId?:string}};
+  reviewAfter?:number;modelDay?:string;modelCalls?:number;offer?:{key:string;place:string;expires:number;decisionId?:string;minutes?:number;optionId?:string}};
 type Sample={at:number;latitude:number;longitude:number;place:string};
 type Presence={place:Place;stableMinutes:number;ageSeconds:number;accuracy:number};
-export type Gate={allow:boolean;reason:string;message?:string;kind?:"place"};
-export type SmartDependencies={events?:EventSink|null;localBuildings?:boolean;lookup?:(point:{latitude:number;longitude:number;accuracy?:number})=>Promise<NearbyPlace[]>;read:(address:string)=>Promise<LocationSnapshot>;decide:(facts:DecisionFacts)=>Promise<PromptDecision>;now?:()=>number};
+export type Gate={allow:boolean;reason:string;message?:string;kind?:"place";plannedMinutes?:number};
+export type SmartDependencies={learn?:(conversation:string,place:string,freeMinutes:number)=>Promise<LearningSummary>;events?:EventSink|null;localBuildings?:boolean;lookup?:(point:{latitude:number;longitude:number;accuracy?:number})=>Promise<NearbyPlace[]>;read:(address:string)=>Promise<LocationSnapshot>;decide:(facts:DecisionFacts)=>Promise<PromptDecision>;now?:()=>number};
 const keyFor=(s:string)=>createHash("sha256").update(s).digest("hex");
 const atPlace=(place:{id?:string;latitude:number;longitude:number;radius?:number},reading:{latitude:number;longitude:number;accuracy:number})=>place.id?.startsWith("uw:")?matchesCampusPlace(place.id,reading):distanceMeters(place,reading)+reading.accuracy<=(place.radius??200);
 const timestamp=(value:string|Date|undefined)=>value instanceof Date?value.getTime():value?Date.parse(value):NaN;
@@ -95,11 +96,11 @@ export class SmartPrompts {
       }else if(command==="smart prompts on"){
         if(!address)return "I couldn't identify your iMessage address.";
         state.enabled=true;state.discovery??=true;state.address=address;this.samples.delete(key);
-        reply=`Smart prompts are on. Saved places: ${state.places.map(p=>p.label).join(", ")||"none—I can recognize UW Seattle buildings for confirmation"}. Fresh, stable location and a calendar opening must pass checks before Grok considers a suggestion. UW building recognition runs locally using campus footprints. It does not require a calendar opening. Text place discovery off to disable discovery. Text why quiet for reasons.`;
+        reply=`Smart prompts are on. Saved places: ${state.places.map(p=>p.label).join(", ")||"none—I can recognize UW Seattle buildings for confirmation"}. Fresh, stable location and a calendar opening must pass checks before the coordinator considers a suggestion. UW building recognition runs locally using campus footprints. It does not require a calendar opening. Text place discovery off to disable discovery. Text why quiet for reasons.`;
       }else if(command==="smart prompts off"){
         state.enabled=false;delete state.address;delete state.candidate;delete state.offer;this.samples.delete(key);reply="Smart prompts are off. Saved places remain; use forget places to remove them.";
       }else if(command==="proactivity status"){
-        reply=`Smart prompts: ${state.enabled?"on":"off"}. Saved places: ${state.places.map(p=>p.label).join(", ")||"none"}. Checks: location age ≤2 minutes, accuracy ≤100 m, three or more distinct readings spanning 3 minutes near a saved place. Text why quiet for recent reasons.`;
+        reply=`Smart prompts: ${state.enabled?"on":"off"}. Coordinator: ${coordinatorProvider()}. Learning observations in last evaluated context: ${[...state.audit].reverse().find(a=>a.context?.learning)?.context?.learning?.observations??"not evaluated yet"}. Saved places: ${state.places.map(p=>p.label).join(", ")||"none"}. Checks: location age ≤2 minutes, accuracy ≤100 m, three or more distinct readings spanning 3 minutes near a saved place. Text why quiet for recent reasons.`;
       }else reply=state.audit.length?"Recent proactive decisions:\n"+state.audit.slice(-5).map(a=>`${formatTime(a.at)}: ${a.action} — ${a.reason}${a.count>1?` (${a.count} checks)`:""}`).join("\n"):"No decisions logged yet. Smart prompts must be on, reminders enabled, and the bot running.";
       await this.save(key,state);return reply;
     });
@@ -184,12 +185,21 @@ export class SmartPrompts {
       const facts:DecisionFacts={place:presence.place.label,stableMinutes:presence.stableMinutes,
         locationAgeSeconds:presence.ageSeconds,accuracyMeters:presence.accuracy,freeMinutes,plannedMinutes:Math.min(45,freeMinutes),
         acceptedRecently:recent.filter(o=>o.kind==="accepted").length,skippedRecently:recent.filter(o=>o.kind==="skipped").length};
+      if(this.deps.learn){
+        try{facts.learning=await this.deps.learn(conversation,presence.place.label,freeMinutes);}
+        catch{return quiet("learning_context_unavailable",facts);}
+      }
       let decision:PromptDecision;
-      try{decision=validateDecision(await this.deps.decide(facts));}
+      try{decision=validateSelectedOption(validateDecision(await this.deps.decide(facts)),facts);}
       catch{return quiet("model_unavailable_or_invalid",facts);}
       if(decision.action!=="offer_study"||decision.confidence<0.75)return quiet(`model_${decision.reason}`,facts);
-      state.offer={key:block.key,place:presence.place.id??presence.place.label,expires:this.now()+10*60000};const audit=this.log(state,"offer_study",decision.reason,presence.place.label,facts);state.offer.decisionId=audit.id;await this.save(key,state);
-      return {allow:true,reason:decision.reason,message:`You've stayed near your saved ${presence.place.label.replaceAll("_"," ")} spot and your demo calendar has ${freeMinutes} free minutes. Want to start a ${Math.min(45,freeMinutes)}-minute study session and add it to Hackathon Demo? Reply yes or skip.`};
+      let latestReading;try{latestReading=freshReading(await this.deps.read(state.address!),this.now());}catch{return quiet("location_changed_during_decision",facts);}
+      if(!latestReading||!atPlace(presence.place,latestReading))return quiet("location_changed_during_decision",facts);
+      const option=facts.learning?.options.find(o=>o.id===decision.optionId);
+      const minutes=option?.minutes??Math.min(45,freeMinutes);
+      const basis=option?.basis==="historical"?` Your past ${presence.place.label.replaceAll("_"," ")} ${option.studySpace!.replaceAll("_"," ")} setup predicts productivity ${option.predictedProductivity!.toFixed(1)}/5 and mood ${option.predictedMood!.toFixed(1)}/5, based on ${option.relevantSessions} matching session(s). Today's workspace may differ.`:facts.learning?" I don't have a matching personal workspace history yet.":"";
+      state.offer={minutes,...(option?{optionId:option.id}:{}),key:block.key,place:presence.place.id??presence.place.label,expires:this.now()+10*60000};const audit=this.log(state,"offer_study",decision.reason,presence.place.label,facts);state.offer.decisionId=audit.id;await this.save(key,state);
+      return {allow:true,reason:decision.reason,plannedMinutes:minutes,message:`You've stayed near your saved ${presence.place.label.replaceAll("_"," ")} spot and your demo calendar has ${freeMinutes} free minutes.${basis} Want to start up to a ${minutes}-minute study session and add it to Hackathon Demo? Reply yes or skip.`};
     });
   }
   async confirm(conversation:string,block:StudyBlock):Promise<boolean>{

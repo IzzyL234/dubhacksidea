@@ -1,3 +1,4 @@
+import {studyOptions,type LearningSummary} from "./study-options.ts";
 import {bookStudyEvent,bookingFailure,type StudyBooking} from "./study-calendar.ts";
 import type {CalendarGateway} from "./calendar-types.ts";
 import {configuredLearningStore,type StudyHistorySource,type LearningPair} from "./learning-store.ts";
@@ -337,8 +338,8 @@ export class StudySessions {
       doc.replies=[...doc.replies,{id:messageId,text:reply}].slice(-40);await this.save(key,doc);return reply;
     });
   }
-  private async buildPersonalLearner(key:string,doc:Document) {
-    const rows=process.env.STUDY_DEMO_SEEDS==="true"?JSON.parse(await readFile(this.seedFile,"utf8")):[];
+  private async buildPersonalLearner(key:string,doc:Document,includeDemo=true,exportModel=true) {
+    const rows=includeDemo&&process.env.STUDY_DEMO_SEEDS==="true"?JSON.parse(await readFile(this.seedFile,"utf8")):[];
     const {learner}=train(rows);const pairs=new Map<string,LearningPair>();let cloudUnavailable=false;
     if(this.history){try{for(const pair of await this.history.load(key)){if(pair?.feedback_record?.id)pairs.set(pair.feedback_record.id,pair);}}catch{cloudUnavailable=true;}}
     let names:string[]=[];
@@ -348,15 +349,24 @@ export class StudySessions {
       const session=doc.sessions.find(s=>s.id===feedback.session_id);
       if(session&&!pairs.has(feedback.id))pairs.set(feedback.id,{session_record:session,feedback_record:feedback});
     }
-    let personal=0;const visitCounts=new Map<string,number>();
+    const contexts:Context[]=[];let personal=0;const visitCounts=new Map<string,number>();
     for(const {session_record:session,feedback_record:feedback} of [...pairs.values()].sort((a,b)=>a.feedback_record.id.localeCompare(b.feedback_record.id))){
       if(feedback.conversation_key!==key||session.user_id!==key||session.status!=="completed"||session.feedback_id!==feedback.id||session.id!==feedback.session_id||session.is_synthetic!==false||feedback.is_synthetic!==false)continue;
       const context=sessionContext(session);if(!context)continue;
-      try{learner.observe({...context,id:feedback.id,user_productivity_rating:feedback.productivity_rating,user_mood_rating:feedback.mood_rating},observationWeight(feedback));personal++;const k=`${context.location}:${context.study_space}`;visitCounts.set(k,(visitCounts.get(k)??0)+1);}catch{/* Invalid observations cannot train the model. */}
+      try{learner.observe({...context,id:feedback.id,user_productivity_rating:feedback.productivity_rating,user_mood_rating:feedback.mood_rating},observationWeight(feedback));personal++;contexts.push(context);const k=`${context.location}:${context.study_space}`;visitCounts.set(k,(visitCounts.get(k)??0)+1);}catch{/* Invalid observations cannot train the model. */}
     }
     // Completed history is authoritative; cached parameters are only an export.
-    await this.sink?.putModelParams?.(learner.toState(key,visitCounts,personal+1));
-    return {learner,rows,personal,cloudUnavailable,visitCounts};
+    if(exportModel)await this.sink?.putModelParams?.(learner.toState(key,visitCounts,personal+1));
+    return {learner,rows,personal,cloudUnavailable,visitCounts,contexts};
+  }
+  async proactiveOptions(conversation:string,place:string,freeMinutes:number):Promise<LearningSummary>{
+    const key=hash(conversation);
+    return this.serialized(key,async()=>{
+      const doc=await this.read(key);
+      // Live proactive decisions never consume synthetic starters or export parameter caches.
+      const {learner,contexts,personal,cloudUnavailable}=await this.buildPersonalLearner(key,doc,false,false);
+      return studyOptions(learner,contexts,place,freeMinutes,personal,cloudUnavailable,this.now());
+    });
   }
   private async score(key:string,current:StudySession,doc:Document):Promise<string>{
     const {learner,rows,personal,cloudUnavailable}=await this.buildPersonalLearner(key,doc);

@@ -7,7 +7,7 @@ import type { StudyBlock } from "./study-events.ts";
 type Delivery = { block: StudyBlock; startAttempted?: boolean; sessionId?: string; endAttempted?: boolean };
 type State = {
   conversation?: string; enabled: boolean; quietEnabled?:boolean; quietStart: number; quietEnd: number;
-  events: Record<string,Delivery>; pending?: {key:string;expires:number;kind?:"place"}; lastPrompt?:number; snoozeUntil?:number;
+  events: Record<string,Delivery>; pending?: {key:string;expires:number;kind?:"place";plannedMinutes?:number}; lastPrompt?:number; snoozeUntil?:number;
   replies:{id:string;conversation:string;reply:string}[];
 };
 export type ReminderDependencies = {
@@ -17,8 +17,8 @@ export type ReminderDependencies = {
   start: (conversation:string,block:StudyBlock)=>Promise<{id:string;reply:string}|null>;
   active: (conversation:string,id:string)=>Promise<boolean>;
   checkIn: (conversation:string)=>Promise<boolean>;
-  observe?:(conversation:string)=>Promise<{allow:boolean;message?:string;kind?:"place"}>;
-  evaluate?:(conversation:string,block:StudyBlock)=>Promise<{allow:boolean;message?:string;kind?:"place"}>;
+  observe?:(conversation:string)=>Promise<{allow:boolean;message?:string;kind?:"place";plannedMinutes?:number}>;
+  evaluate?:(conversation:string,block:StudyBlock)=>Promise<{allow:boolean;message?:string;kind?:"place";plannedMinutes?:number}>;
   resolvePlace?:(conversation:string,accept:boolean)=>Promise<string>;
   confirm?:(conversation:string,block:StudyBlock)=>Promise<boolean>;
   audit?:(conversation:string,reason:string)=>Promise<void>;
@@ -89,11 +89,11 @@ export class StudyReminders {
         else{
           // Re-read Calendar before confirmation so a canceled or rescheduled event cannot start a stale session.
           const fresh=(await this.deps.events(this.now())).find(b=>b.key===pending.key);
-          if(!fresh||this.now()<fresh.start||this.now()>=fresh.end||(fresh.kind==="open"&&fresh.end-this.now()<30*60_000)){delete state.pending;reply="That calendar opening changed or ended. Text open time for new options, or start studying to begin manually.";}
+          if(!fresh||this.now()<fresh.start||this.now()>=fresh.end||(fresh.kind==="open"&&fresh.end-this.now()<Math.min(30,pending.plannedMinutes??30)*60_000)){delete state.pending;reply="That calendar opening changed or ended. Text open time for new options, or start studying to begin manually.";}
           else if(await this.deps.busy(conversation))reply="You already have an unfinished session or check-in. Finish it first, or text discard session.";
           else{
             if(this.deps.confirm&&!await this.deps.confirm(conversation,fresh)){delete state.pending;await this.save(state);return "Your location changed or is no longer fresh. No session was created. Text start studying to begin manually.";}
-            const planned=fresh.kind==="open"?{...fresh,start:this.now(),end:this.now()+Math.min(45,Math.floor((fresh.end-this.now())/60_000))*60_000}:fresh;
+            const planned=fresh.kind==="open"?{...fresh,start:this.now(),end:this.now()+Math.min(pending.plannedMinutes??45,Math.floor((fresh.end-this.now())/60_000))*60_000}:fresh;
             const started=await this.deps.start(conversation,planned);
             if(!started)reply="You already have an unfinished study session. Text study status.";
             else{
@@ -155,14 +155,15 @@ export class StudyReminders {
       if(!block){await this.audit(state.conversation,"no_eligible_opening");await this.save(state);return;}
       const gate=this.deps.evaluate?await this.deps.evaluate(state.conversation,block):{allow:true,message:undefined};
       if(!gate.allow){await this.save(state);return;}
+      if(gate.plannedMinutes!==undefined&&(!Number.isInteger(gate.plannedMinutes)||gate.plannedMinutes<25||gate.plannedMinutes>45||gate.plannedMinutes*60000>block.end-this.now())){await this.audit(state.conversation,"invalid_selected_duration");await this.save(state);return;}
       if(this.deps.evaluate){
         const fresh=(await this.deps.events(this.now())).find(b=>b.key===block.key);
-        if(!fresh||fresh.end-this.now()<30*60_000||await this.deps.busy(state.conversation)||(state.quietEnabled===true&&isQuiet(this.now(),state.quietStart,state.quietEnd))){
+        if(!fresh||fresh.end-this.now()<Math.min(30,gate.plannedMinutes??30)*60_000||await this.deps.busy(state.conversation)||(state.quietEnabled===true&&isQuiet(this.now(),state.quietStart,state.quietEnd))){
           await this.audit(state.conversation,"context_changed_before_send");await this.save(state);return;
         }
       }
       state.events[gate.kind==="place"?`place:${now}:${block.key}`:block.key]={block:{...block,start:now},startAttempted:true};
-      state.pending={key:block.key,expires:Math.min(block.end,now+10*60_000),...(gate.kind?{kind:gate.kind}:{})};state.lastPrompt=now;
+      state.pending={key:block.key,expires:Math.min(block.end,now+10*60_000),...(gate.plannedMinutes!==undefined?{plannedMinutes:gate.plannedMinutes}:{}),...(gate.kind?{kind:gate.kind}:{})};state.lastPrompt=now;
       await this.save(state);
       await this.deps.send(state.conversation,gate.message??(block.kind==="open"
         ?`Your demo calendar has ${Math.floor((block.end-now)/60_000)} free minutes now. Want to start a ${Math.min(45,Math.floor((block.end-now)/60_000))}-minute study session and add it to Hackathon Demo? Reply yes or skip. I'll only follow up if you start.`
@@ -170,3 +171,4 @@ export class StudyReminders {
     });
   }
 }
+
