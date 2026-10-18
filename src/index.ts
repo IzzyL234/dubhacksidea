@@ -1,4 +1,6 @@
-import { getPhotonLocationStatus } from "./photon-location.ts";
+import { SmartPrompts } from "./smart-prompts.ts";
+import { decidePrompt } from "./proactive-decision.ts";
+import { readPhotonLocation, getPhotonLocationStatus } from "./photon-location.ts";
 import { LocationDiagnostics } from "./location-diagnostics.ts";
 import { LocationTrial } from "./location.ts";
 import { StudySessions } from "./sessions.ts";
@@ -35,7 +37,12 @@ const locationTrial = new LocationTrial();
 const locationDiagnostics = new LocationDiagnostics();
 const messaging = imessage(app);
 const calendarCommands = new CalendarCommands(demoCalendar);
+const smartPrompts = new SmartPrompts({read:readPhotonLocation,decide:decidePrompt});
 const reminders = new StudyReminders({
+  evaluate:(c,b)=>smartPrompts.evaluate(c,b),
+  confirm:(c,b)=>smartPrompts.confirm(c,b),
+  audit:(c,r)=>smartPrompts.audit(c,r),
+  outcome:(c,k)=>smartPrompts.outcome(c,k),
   events: now => getOpenStudyWindows(now),
   send: async (conversation, text) => { const space = await messaging.space.get(conversation); await space.send(text); },
   busy: async conversation => await studySessions.hasUnfinished(conversation) || await feedbackFlow.hasDraft(conversation),
@@ -77,7 +84,7 @@ Ask one clarifying question at a time when needed. To record a study check-in, t
 To track a linked study session, tell the user to text "start studying", then send place/seat/planned minutes such as "library desk 45". They can send a workspace photo, use "study score" for an estimate, and text "done" for linked ratings. These commands are handled separately; never claim you ran them yourself or invent workspace measurements.
 Calendar reminders are controlled by "reminders on", "reminders off", "reminders status", and "quiet hours 22 8". They detect open time between commitments, not event titles. The default study window is 9 AM–8 PM Pacific with at least 30 free minutes and 10-minute buffers. Only Hackathon Demo is checked. Never claim to enable reminders yourself. They work while the bot runs and use Pacific quiet hours. Text "open time" to list gaps.
 The bot reads upcoming events with "calendar"; "calendar events" shows numbered events for editing. Calendar tools support explicit commands: "add event Title | YYYY-MM-DD 14:00 | YYYY-MM-DD 14:45", "move event 2 | YYYY-MM-DD 15:00 | YYYY-MM-DD 15:45", or "rename event 2 | New title". Times are Pacific; use "calendar help" for syntax. Never claim an event was created or edited yourself: deterministic handlers execute these commands and confirm actual results.
-Never invent calendar events, claim you performed a calendar lookup yourself, or claim you booked or saved anything. You cannot access live phone location. For a shared-location trial, tell the user to text location. Never infer their current location from conversation or claim GPS access. For an actual shared Find My snapshot check, tell the user to text live location status; a separate handler calls Photon. Never claim continuous tracking or automatic arrival detection is enabled.
+Never invent calendar events, claim you performed a calendar lookup yourself, or claim you booked or saved anything. Shared Find My location is available only through separate explicit handlers. For a shared-location trial, tell the user to text location. Never infer their current location from conversation or claim GPS access. For an actual shared Find My snapshot check, tell the user to text live location status; a separate handler calls Photon. Smart suggestions require the user to text "remember place library" while there, then "smart prompts on". Fresh distinct location readings over three minutes, calendar availability, quiet hours, and prompt limits must pass before a separate Grok decision. "why quiet" shows reasons. Never infer that these checks passed or that a session started. "smart prompts off" stops suggestions.
 `;
 
 type GrokResponse = {
@@ -141,6 +148,15 @@ for await (const [space, envelope] of app.messages) {
   if (!incoming) continue;
 
   try {
+    if(incoming.toLowerCase()==="smart prompts on"){
+      const connected=await reminders.handle(space.id,"reminders on",message.id+":connect");
+      if(!await reminders.enabledFor(space.id)){await space.send(connected??"Could not connect reminders.");continue;}
+    }
+    const smartReply=await smartPrompts.handle(space.id,message.sender?.id,incoming);
+    if(smartReply!==null){
+      if(incoming.toLowerCase()==="smart prompts off")await reminders.handle(space.id,"reminders off",message.id+":disconnect");
+      await space.send(smartReply);void pollStudyReminders();continue;
+    }
     if (/^(?:open time|free time|find open time|when am i free)[?.!]*$/i.test(incoming)) {
       await space.send(await getOpenTimeReply());
       continue;

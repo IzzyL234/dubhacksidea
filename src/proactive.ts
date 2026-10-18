@@ -7,7 +7,7 @@ import type { StudyBlock } from "./study-events.ts";
 type Delivery = { block: StudyBlock; startAttempted?: boolean; sessionId?: string; endAttempted?: boolean };
 type State = {
   conversation?: string; enabled: boolean; quietStart: number; quietEnd: number;
-  events: Record<string,Delivery>; pending?: {key:string;expires:number}; lastPrompt?:number;
+  events: Record<string,Delivery>; pending?: {key:string;expires:number}; lastPrompt?:number; snoozeUntil?:number;
   replies:{id:string;conversation:string;reply:string}[];
 };
 export type ReminderDependencies = {
@@ -17,6 +17,10 @@ export type ReminderDependencies = {
   start: (conversation:string,block:StudyBlock)=>Promise<{id:string;reply:string}|null>;
   active: (conversation:string,id:string)=>Promise<boolean>;
   checkIn: (conversation:string)=>Promise<boolean>;
+  evaluate?:(conversation:string,block:StudyBlock)=>Promise<{allow:boolean;message?:string}>;
+  confirm?:(conversation:string,block:StudyBlock)=>Promise<boolean>;
+  audit?:(conversation:string,reason:string)=>Promise<void>;
+  outcome?:(conversation:string,kind:"accepted"|"skipped")=>Promise<void>;
   now?:()=>number;
 };
 export function isQuiet(now:number,start:number,end:number,timezone="America/Los_Angeles"):boolean {
@@ -39,6 +43,9 @@ export class StudyReminders {
     await mkdir(dirname(this.path),{recursive:true});const tmp=`${this.path}.${randomUUID()}.tmp`;
     await writeFile(tmp,JSON.stringify(state),{mode:0o600});await rename(tmp,this.path);
   }
+  async enabledFor(conversation:string):Promise<boolean>{return this.serialized(async()=>{const s=await this.read();return s.enabled&&s.conversation===conversation;});}
+  private async audit(conversation:string,reason:string){try{await this.deps.audit?.(conversation,reason);}catch{}}
+  private async outcome(conversation:string,kind:"accepted"|"skipped"){try{await this.deps.outcome?.(conversation,kind);}catch{}}
   async handle(conversation:string,text:string,messageId:string):Promise<string|null>{
     return this.serialized(async()=>{
       const command=text.trim().toLowerCase().replace(/[.!?]+$/,"");
@@ -69,7 +76,7 @@ export class StudyReminders {
         // "skip" can also be an answer in the existing distraction-source check-in.
         if(await this.deps.checkIn(conversation))return null;
         const pending=state.pending;
-        if(command==="skip"){delete state.pending;reply="Skipped this study block. No session was created.";}
+        if(command==="skip"){delete state.pending;state.snoozeUntil=this.now()+60*60_000;await this.save(state);await this.outcome(conversation,"skipped");reply="Skipped this study block. No session was created.";}
         else if(this.now()>pending.expires){delete state.pending;reply="That study prompt has expired. Text start studying if you're starting now.";}
         else{
           // Re-read Calendar before confirmation so a canceled or rescheduled event cannot start a stale session.
@@ -77,13 +84,14 @@ export class StudyReminders {
           if(!fresh||this.now()<fresh.start||this.now()>=fresh.end||(fresh.kind==="open"&&fresh.end-this.now()<30*60_000)){delete state.pending;reply="That calendar opening changed or ended. Text open time for new options, or start studying to begin manually.";}
           else if(await this.deps.busy(conversation))reply="You already have an unfinished session or check-in. Finish it first, or text discard session.";
           else{
+            if(this.deps.confirm&&!await this.deps.confirm(conversation,fresh)){delete state.pending;await this.save(state);return "Your location changed or is no longer fresh. No session was created. Text start studying to begin manually.";}
             const planned=fresh.kind==="open"?{...fresh,start:this.now(),end:this.now()+Math.min(45,Math.floor((fresh.end-this.now())/60_000))*60_000}:fresh;
             const started=await this.deps.start(conversation,planned);
             if(!started)reply="You already have an unfinished study session. Text study status.";
             else{
               state.events[pending.key]??={block:fresh,startAttempted:true};
               state.events[pending.key]!.sessionId=started.id;state.events[pending.key]!.block=planned;
-              delete state.pending;reply=started.reply;
+              delete state.pending;await this.save(state);await this.outcome(conversation,"accepted");reply=started.reply;
             }
           }
         }
@@ -96,7 +104,7 @@ export class StudyReminders {
     return this.serialized(async()=>{
       const state=await this.read();if(!state.enabled||!state.conversation)return;
       const now=this.now();
-      if(isQuiet(now,state.quietStart,state.quietEnd))return;
+      if(isQuiet(now,state.quietStart,state.quietEnd)){await this.audit(state.conversation,"quiet_hours");return;}
       const blocks=(await this.deps.events(now)).sort((a,b)=>a.start-b.start);
       const current=new Map(blocks.map(b=>[b.key,b]));
       if(state.pending&&(state.pending.expires<now||!current.has(state.pending.key)))delete state.pending;
@@ -114,19 +122,28 @@ export class StudyReminders {
         await this.deps.send(state.conversation,"Your calendar study block has ended. When you're finished, text done for your quick check-in. If you're still studying, keep going—I'll stay quiet.");
         return;
       }
-      if(state.pending||await this.deps.busy(state.conversation)){await this.save(state);return;}
-      if(state.lastPrompt!==undefined&&now-state.lastPrompt<10*60_000){await this.save(state);return;}
+      if(state.pending||await this.deps.busy(state.conversation)){await this.audit(state.conversation,state.pending?"pending_prompt":"unfinished_session_or_checkin");await this.save(state);return;}
+      if(now<(state.snoozeUntil??0)){await this.audit(state.conversation,"skipped_cooldown");await this.save(state);return;}
+      if(state.lastPrompt!==undefined&&now-state.lastPrompt<10*60_000){await this.audit(state.conversation,"prompt_cooldown");await this.save(state);return;}
       const today=new Date(now).toLocaleDateString("en-CA",{timeZone:"America/Los_Angeles"});
       const attemptsToday=Object.values(state.events).filter(d=>d.startAttempted&&new Date(d.block.start).toLocaleDateString("en-CA",{timeZone:"America/Los_Angeles"})===today).length;
-      if(attemptsToday>=2){await this.save(state);return;}
+      if(attemptsToday>=2){await this.audit(state.conversation,"daily_prompt_budget");await this.save(state);return;}
       const block=blocks.find(b=>now>=b.start&&(b.kind==="open"?b.end-now>=30*60_000:now-b.start<=5*60_000)&&now<b.end&&!state.events[b.key]?.startAttempted);
-      if(!block){await this.save(state);return;}
+      if(!block){await this.audit(state.conversation,"no_eligible_opening");await this.save(state);return;}
+      const gate=this.deps.evaluate?await this.deps.evaluate(state.conversation,block):{allow:true,message:undefined};
+      if(!gate.allow){await this.save(state);return;}
+      if(this.deps.evaluate){
+        const fresh=(await this.deps.events(this.now())).find(b=>b.key===block.key);
+        if(!fresh||fresh.end-this.now()<30*60_000||await this.deps.busy(state.conversation)||isQuiet(this.now(),state.quietStart,state.quietEnd)){
+          await this.audit(state.conversation,"context_changed_before_send");await this.save(state);return;
+        }
+      }
       state.events[block.key]={block,startAttempted:true};
       state.pending={key:block.key,expires:Math.min(block.end,now+10*60_000)};state.lastPrompt=now;
       await this.save(state);
-      await this.deps.send(state.conversation,block.kind==="open"
+      await this.deps.send(state.conversation,gate.message??(block.kind==="open"
         ?`Your demo calendar has ${Math.floor((block.end-now)/60_000)} free minutes now. Want a ${Math.min(45,Math.floor((block.end-now)/60_000))}-minute study session? Reply yes or skip. I'll only follow up if you start.`
-        :`Ready for your calendar block “${block.title}”? Reply yes to start a study session, or skip. I'll only follow up if you start.`);
+        :`Ready for your calendar block “${block.title}”? Reply yes to start a study session, or skip. I'll only follow up if you start.`));
     });
   }
 }
