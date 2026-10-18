@@ -1,12 +1,16 @@
 import {generateText,textProvider} from "./text-model.ts";
 import type {LearningSummary} from "./study-options.ts";
+import {CALENDAR_PROPOSAL_BATCH_SCHEMA,validateAndStageBatch,type CalendarProposalBatch,type StagedChangeProposal} from "./staged-proposals.ts";
+import type {DemoEvent} from "./calendar-types.ts";
 export type DecisionFacts = {triggers?:string[];sessionState?:unknown;
  place:"library"|"cafe"|"home"|"dorm_room"|"classroom"|"campus_building"|"unknown";
  stableMinutes:number;locationAgeSeconds:number;accuracyMeters:number;freeMinutes:number;plannedMinutes:number;acceptedRecently:number;skippedRecently:number;
  placeEvidence?:{confirmed:boolean;homeStatus:"at_saved_home"|"away_from_saved_home"|"unknown";canSave:boolean;calendarAvailable:boolean;matchedBuilding:boolean;arrivalCheckInEligible?:boolean};
  learning?:LearningSummary;
+ rhythm?:{hourly_activity_prob:number[];rolling_fatigue:number;onboarding_stage:"cold_start"|"calibrating"|"personalized"};
+ calendarSnapshot?:DemoEvent[];
 };
-export type PromptDecision={action:"stay_quiet"|"offer_study"|"ask_place"|"check_in";reason:"useful_window"|"uncertain_context"|"poor_timing"|"recent_decline";confidence:number;optionId?:string|null};
+export type PromptDecision={action:"stay_quiet"|"offer_study"|"ask_place"|"check_in";reason:"useful_window"|"uncertain_context"|"poor_timing"|"recent_decline";confidence:number;optionId?:string|null;proposalBatch?:CalendarProposalBatch|null};
 export function validateDecision(value:unknown):PromptDecision{
  const v=value as Record<string,unknown>|null;
  const keys=v?Object.keys(v).sort().join(","):"";
@@ -35,4 +39,33 @@ export function coordinatorProvider():"gemini"|"xai"{return textProvider();}
 export async function decidePrompt(facts:DecisionFacts,request:typeof fetch=fetch):Promise<PromptDecision>{
  const output=await generateText(instructions,[{role:"user",parts:[{text:JSON.stringify(facts)}]}],schema,request);
  return validateSelectedOption(validateDecision(JSON.parse(output)),facts);
+}
+
+const agenticPlannerInstructions = `You are an Agentic Calendar Planner backed by a Staged Approval Queue ("Git Diff for Calendar").
+You receive the user's current calendar snapshot, LearnedUserRhythm (24-hour active probability curve + rolling fatigue), and LinUCB contextual bandit scores as context—not handcuffs.
+Synthesize the context and user request to propose a CalendarProposalBatch containing any combination of:
+- CREATE_EVENT (classes, study_block, routine, personal; supports recurring_days)
+- UPDATE_EVENT (move or rename existing events)
+- SPLIT_OR_RESCHEDULE_BLOCK (split study blocks into remaining_chunks)
+- DELETE_EVENT (remove events)
+- UPDATE_DEADLINE (shift assignment deadlines and rebalance study blocks)
+Every proposed mutation is staged for human approval before mutating live calendar state.`;
+
+export async function proposeAgenticSchedule(
+ userPrompt: string,
+ facts: Partial<DecisionFacts>,
+ request: typeof fetch = fetch
+): Promise<StagedChangeProposal> {
+ const raw = await generateText(
+  agenticPlannerInstructions,
+  [{ role: "user", parts: [{ text: JSON.stringify({ userPrompt, facts }) }] }],
+  CALENDAR_PROPOSAL_BATCH_SCHEMA,
+  request
+ );
+ const batch = JSON.parse(raw) as CalendarProposalBatch;
+ return validateAndStageBatch(
+  batch,
+  facts.calendarSnapshot ?? [],
+  "proactive_agent"
+ );
 }
