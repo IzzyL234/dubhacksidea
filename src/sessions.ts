@@ -422,6 +422,13 @@ export class StudySessions {
     if(exportModel)await this.sink?.putModelParams?.(learner.toState(key,visitCounts,personal+1));
     return {learner,rows,personal,cloudUnavailable,visitCounts,contexts};
   }
+  async timeEstimates(conversation:string,start:number,lengths:number[]){
+    const key=hash(conversation);return this.serialized(key,async()=>{
+      const {learner}=await this.buildPersonalLearner(key,await this.read(key),this.demoPrior,false);
+      if(!learner.count)return [];
+      return lengths.map(minutes=>{const p=learner.predict({timestamp:new Date(start).toISOString(),duration_mins:minutes,location:null,study_space:null,environment:{clutter_score:null,lighting:null,ergonomics:null}});return {minutes,productivity:p.predictedProductivity,mood:p.predictedMood,utility:p.predictedUtility,observations:learner.count};});
+    });
+  }
   async proactiveOptions(conversation:string,place:string,freeMinutes:number):Promise<LearningSummary>{
     const key=hash(conversation);
     return this.serialized(key,async()=>{

@@ -1,3 +1,4 @@
+import {isStudyTimeRequest,studyTimeReply} from "./study-time.ts";
 import {photoAttachment} from "./photo-input.ts";
 import {acquireInstance,AlreadyRunning} from "./single-instance.ts";
 import {fileURLToPath as instanceFilePath} from "node:url";
@@ -247,6 +248,11 @@ for await (const [space, envelope] of app.messages) {
     }
     if(incoming.toLowerCase()==="retry calendar"){
       await space.send(await studySessions.retryCalendar(space.id,demoCalendar));continue;
+    }
+    if(isStudyTimeRequest(incoming)){
+      try{await space.send(await studyTimeReply(incoming,await getOpenStudyWindows(),(start,lengths)=>studySessions.timeEstimates(space.id,start,lengths)));}
+      catch{await space.send("I couldn’t read your calendar openings just now. Please try again shortly; I haven’t booked anything.");}
+      continue;
     }
     if(isStudyRecommendation(incoming)){const recommendation=await studySessions.handle(space.id,incoming,message.id);if(recommendation){await space.send(recommendation);continue;}}
     const extraReply=await sessionContext.handle(space.id,incoming,message.id);
