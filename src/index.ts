@@ -97,6 +97,7 @@ const feedbackFlow = new FeedbackFlow(undefined, undefined, {
 const locationTrial = new LocationTrial();
 const locationDiagnostics = new LocationDiagnostics();
 const messaging = imessage(app);
+const conversationSenders=new Map<string,string>();
 const calendarCommands = new CalendarCommands(demoCalendar,undefined,Date.now,interpretCalendar);
 const stagedProposals = new StagedProposalEngine(demoCalendar);
 const smartPrompts = new SmartPrompts({eventDriven:true,sessionState:async c=>({...await studySessions.chatContext(c),feedbackPending:await feedbackFlow.hasDraft(c)}),coordinatorPlaces:true,learn:async(c,p,m)=>({...await studySessions.proactiveOptions(c,p,m),sessionContext:await sessionContext.summary(c)}),events:configuredEventSink(),read:readPhotonLocation,decide:decidePrompt,lookup:lookupCampusBuildings,localBuildings:true});
@@ -119,7 +120,7 @@ const reminders = new StudyReminders({
   checkIn: conversation => feedbackFlow.hasDraft(conversation),
 });
 const scheduleReviews=new ScheduleReviewService({gateway:demoCalendar,reviewUrl:(process.env.FRONTEND_URL??"http://localhost:3000").replace(/\/+$/,"")+"/dashboard",upload:configuredReviewUpload(),connected:c=>reminders.enabledFor(c),allowed:async c=>await reminders.notificationAllowedFor(c)&&!await studySessions.hasUnfinished(c)&&!await feedbackFlow.hasDraft(c)&&!await conversationAgent.hasPending(c),estimate:(c,start,lengths)=>studySessions.timeEstimates(c,start,lengths),send:async(c,text)=>{const space=await messaging.space.get(c);await space.send(text);}});
-const agentTools=createAgentTools({calendar:demoCalendar,openings:getOpenStudyWindows,estimate:(c,start,lengths)=>studySessions.timeEstimates(c,start,lengths),learning:c=>studySessions.proactiveOptions(c,"unknown",60),notes:c=>sessionContext.summary(c)});
+const agentTools=createAgentTools({calendar:demoCalendar,openings:getOpenStudyWindows,estimate:(c,start,lengths)=>studySessions.timeEstimates(c,start,lengths),learning:async c=>{const [knowledge,currentLocation]=await Promise.all([studySessions.placeRecommendations(c),smartPrompts.currentPlace(c,conversationSenders.get(c)).catch(()=>({status:"unavailable",reason:"Location lookup unavailable."}))]);return {...knowledge,currentLocation};},notes:c=>sessionContext.summary(c)});
 const conversationAgent=new ConversationAgent({tool:agentTools.read,book:agentTools.book,session:c=>studySessions.chatContext(c)});
 const conversationQueue=new ConversationQueue();
 const dailyBrief=new DailyBrief({calendar:demoCalendar,recipient:()=>reminders.notificationRecipient(),allowed:c=>reminders.notificationAllowedFor(c),busy:async c=>await feedbackFlow.hasDraft(c)||await conversationAgent.hasPending(c),send:async(c,text)=>{const space=await messaging.space.get(c);await space.send(text);},opportunity:async(c,date)=>{const data=await agentTools.read(c,"openings",{date,notBefore:null,minutes:30}) as {options?:{start:number;end:number}[]};const first=data.options?.[0];if(!first)return null;return "There is a 30-minute study opening at "+new Date(first.start).toLocaleTimeString("en-US",{timeZone:"America/Los_Angeles",hour:"numeric",minute:"2-digit"})+" Pacific. Ask me to plan a study block if you would like to use it.";}});
@@ -190,6 +191,7 @@ async function handleEnvelope(space:BotInboxItem[0],envelope:BotInboxItem[1]) {
   const claimed=await messageDelivery.claim(space.id,message.id);
   console.log("[delivery] inbound",JSON.stringify({run:runTag,chat:messageTag(space.id),message:messageTag(message.id),claimed,type:message.content.type}));
   if(!claimed)continue;
+  if(message.sender?.id)conversationSenders.set(space.id,message.sender.id);
   if (message.content.type === "text" && /^(?:live location status|location api status)[.!?]*$/i.test(message.content.text.trim())) {
     try { await space.send(message.sender?.id ? await getPhotonLocationStatus(message.sender.id) : "I couldn't identify the sender for a location lookup."); }
     catch { console.error("Could not send the location status reply."); }
@@ -308,7 +310,7 @@ async function handleEnvelope(space:BotInboxItem[0],envelope:BotInboxItem[1]) {
       await space.send(await studySessions.retryCalendar(space.id,demoCalendar));continue;
     }
 
-    if(isStudyRecommendation(incoming)){const recommendation=await studySessions.handle(space.id,incoming,message.id);if(recommendation){await space.send(recommendation);continue;}}
+    if(isStudyRecommendation(incoming)){const answer=await conversationAgent.run(space.id,incoming,message.id);if(answer?.cancelled)continue;if(answer?.reply){await space.send(answer.reply);continue;}const recommendation=await studySessions.handle(space.id,incoming,message.id);if(recommendation){await space.send(recommendation);continue;}}
     const extraReply=await sessionContext.handle(space.id,incoming,message.id);
     if(extraReply!==null){await space.send(extraReply);void pollStudyReminders();continue;}
     const energyReply=await studySessions.answerEnergy(space.id,incoming,message.id);

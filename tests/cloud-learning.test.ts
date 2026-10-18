@@ -82,3 +82,15 @@ test('a new coalesced event written during upload is retained for the next flush
  await smart.handle('private-chat','+15555550123','smart prompts on');await smart.audit('private-chat','no_eligible_opening');const flush=smart.syncPending();await entered;
  await smart.audit('private-chat','no_eligible_opening');release();await flush;expect(await smart.syncPending()).toBe(1);expect(await smart.syncPending()).toBe(0);
 });
+
+test('agent place evidence changes with owned ratings and keeps partially known recorded profiles',async()=>{
+ const d=await root(),row=pair();row.session_record.environment.ergonomics=null;
+ const s=new StudySessions(join(d,'sessions'),null,join(d,'feedback'),'missing-seed',undefined,{load:async()=>[row]});
+ const low=await s.placeRecommendations('private-chat');expect(low.personalObservations).toBe(1);expect(low.places[0]?.place).toBe('library');expect(low.places[0]?.matchingPersonalSessions).toBe(1);expect(low.places[0]?.basis).toBe('personal_history');
+ row.feedback_record.productivity_rating=5;row.feedback_record.mood_rating=5;
+ const high=await s.placeRecommendations('private-chat');expect(high.places[0]!.productivity).toBeGreaterThan(low.places[0]!.productivity);expect((await s.placeRecommendations('other-chat')).places).toHaveLength(0);expect(JSON.stringify(high)).not.toContain(user);
+});
+test('agent place evidence does not fabricate a favorite from ratings without recorded place',async()=>{
+ const d=await root(),row=pair();row.session_record.location=null;
+ const s=new StudySessions(join(d,'sessions'),null,join(d,'feedback'),'missing-seed',undefined,{load:async()=>[row]});const r=await s.placeRecommendations('private-chat');expect(r.personalObservations).toBe(1);expect(r.places).toHaveLength(0);
+});

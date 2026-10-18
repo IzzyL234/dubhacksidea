@@ -449,11 +449,11 @@ export class StudySessions {
       const session=doc.sessions.find(s=>s.id===feedback.session_id);
       if(session&&session.user_id===key&&feedback.conversation_key===key)pairs.set(feedback.id,{session_record:session,feedback_record:feedback});
     }
-    const contexts:Context[]=[];let personal=0;const visitCounts=new Map<string,number>();
+    const contexts:Context[]=[],learningProfiles:LearningContext[]=[];let personal=0;const visitCounts=new Map<string,number>();
     for(const {session_record:session,feedback_record:feedback} of [...pairs.values()].sort((a,b)=>a.feedback_record.id.localeCompare(b.feedback_record.id))){
       if(feedback.conversation_key!==key||session.user_id!==key||session.status!=="completed"||session.feedback_id!==feedback.id||session.id!==feedback.session_id||session.is_synthetic!==false||feedback.is_synthetic!==false)continue;
       const context=learningContext(session);if(!context)continue;
-      try{learner.observe({...context,id:feedback.id,user_productivity_rating:feedback.productivity_rating,user_mood_rating:feedback.mood_rating},observationWeight(feedback));personal++;const complete=sessionContext(session);if(complete)contexts.push(complete);if(context.location&&context.study_space){const k=`${context.location}:${context.study_space}`;visitCounts.set(k,(visitCounts.get(k)??0)+1);}}catch{/* Invalid observations cannot train the model. */}
+      try{learner.observe({...context,id:feedback.id,user_productivity_rating:feedback.productivity_rating,user_mood_rating:feedback.mood_rating},observationWeight(feedback));personal++;learningProfiles.push(context);const complete=sessionContext(session);if(complete)contexts.push(complete);if(context.location&&context.study_space){const k=`${context.location}:${context.study_space}`;visitCounts.set(k,(visitCounts.get(k)??0)+1);}}catch{/* Invalid observations cannot train the model. */}
     }
     // Replay is authoritative. Cache v2 is durable and namespaced away from the Python model.
     let modelExportUnavailable=false;
@@ -462,7 +462,7 @@ export class StudySessions {
       await writeFile(temp,JSON.stringify({featureVersion:2,personalObservations:personal,demoObservations:demoObservations.length,completeProfiles:contexts.length,cloudUnavailable,model}),{mode:0o600});await rename(temp,path);
       try{await this.sink?.putModelParams?.(model);}catch{modelExportUnavailable=true;}
     }
-    return {learner,rows,personal,cloudUnavailable,modelExportUnavailable,visitCounts,contexts};
+    return {learner,rows,personal,cloudUnavailable,modelExportUnavailable,visitCounts,contexts,learningProfiles};
   }
   async rebuildDaily():Promise<{rebuilt:number;day:string}>{
     const day=localDate(this.now()),path=join(this.directory,"model-maintenance.json");
@@ -477,6 +477,17 @@ export class StudySessions {
       const {learner}=await this.buildPersonalLearner(key,await this.read(key),this.demoPrior,false);
       if(!learner.count)return [];
       return lengths.map(minutes=>{const p=learner.predict({timestamp:new Date(start).toISOString(),duration_mins:minutes,location:null,study_space:null,environment:{clutter_score:null,lighting:null,ergonomics:null}});return {minutes,productivity:p.predictedProductivity,mood:p.predictedMood,utility:p.predictedUtility,observations:learner.count};});
+    });
+  }
+  async placeRecommendations(conversation:string){
+    const key=hash(conversation);return this.serialized(key,async()=>{
+      const {learner,learningProfiles,personal,rows,cloudUnavailable}=await this.buildPersonalLearner(key,await this.read(key),this.demoPrior,false);
+      const candidates=personal>0?learningProfiles:train(rows).observations;
+      const profiles=new Map<string,LearningContext>();
+      for(const c of [...candidates].sort((a,b)=>Date.parse(b.timestamp)-Date.parse(a.timestamp))){if(!c.location)continue;const id=c.location+':'+(c.study_space??'unknown');if(!profiles.has(id))profiles.set(id,c);}
+      const scored=[...profiles].map(([id,c])=>{const prediction=learner.predict({...c,timestamp:new Date(this.now()).toISOString(),duration_mins:45});return {id,place:c.location,studySpace:c.study_space,productivity:prediction.predictedProductivity,mood:prediction.predictedMood,selectionScore:prediction.selectionScore,uncertainty:prediction.uncertainty,matchingPersonalSessions:learningProfiles.filter(p=>p.location===c.location&&p.study_space===c.study_space).length,profileAgeDays:Math.max(0,Math.floor((this.now()-Date.parse(c.timestamp))/86400000)),basis:personal>0?'personal_history':'starter_history'};}).sort((a,b)=>b.selectionScore-a.selectionScore);
+      const places=scored.filter((p,i)=>!scored.slice(0,i).some(q=>q.place===p.place)).slice(0,5);
+      return {personalObservations:personal,modelObservations:learner.count,cloudUnavailable,places,scope:'These are category-level estimates for 45 minutes using recorded workspace profiles, not current observations. The shared model includes starter data and this chat’s linked ratings. No travel time, building opening hours, or current workspace conditions were checked. A category score is not a score for a named building.'};
     });
   }
   async proactiveOptions(conversation:string,place:string,freeMinutes:number):Promise<LearningSummary>{

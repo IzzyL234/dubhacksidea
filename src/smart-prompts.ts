@@ -72,6 +72,17 @@ export class SmartPrompts {
       if(uploaded>=limit)return uploaded;
     }return uploaded;
   }
+  async currentPlace(conversation:string,address?:string){
+    const state=await this.locked(keyFor(conversation),()=>this.read(keyFor(conversation)));
+    const sender=address??state.address;
+    if(!sender)return {status:'unavailable',reason:'No sender address is available for this chat.'};
+    let reading;try{reading=freshReading(await this.deps.read(sender),this.now());}catch{return {status:'unavailable',reason:'The location service did not return a usable snapshot.'};}
+    if(!reading)return {status:'stale',reason:'A reading within two minutes and accuracy of 100 meters or better is required.'};
+    const saved=state.places.filter(p=>atPlace(p,reading));
+    let places:NearbyPlace[]=[];try{places=await this.deps.lookup?.(reading)??[];}catch{/* A fresh coordinate can still be available without a building match. */}
+    const place=places.length===1?places[0]:null;
+    return {status:'fresh',capturedAt:new Date(reading.at).toISOString(),building:place?.name??null,category:saved.length===1?saved[0]!.label:place?.label??'unknown',savedName:saved.length===1?saved[0]!.name??null:null,scope:'This is a fresh building/region estimate, not continuous tracking or a workspace measurement. It does not save a place or start a session.'};
+  }
   async handle(conversation:string,address:string|undefined,text:string):Promise<string|null>{
     const command=text.trim().toLowerCase().replace(/[.!?]+$/,"");
     if(!/^(remember place(?: .*)?|forget places|smart prompts (?:on|off)|place discovery (?:on|off)|proactivity (?:status|log)|why quiet|where am i|campus location|detect building)$/.test(command))return null;
