@@ -6,6 +6,8 @@ type Snapshot = {
     model: {
         algorithm: string
         observations: number
+        demoObservations?: number
+        totalObservations?: number
         excluded: number
         status: string
         weights: { feature: string; productivity: number; mood: number }[]
@@ -376,8 +378,8 @@ export default function LearningPanel({
                             >
                                 {[
                                     [
-                                        "Sessions learned from",
-                                        String(data.model.observations),
+                                        "Training observations",
+                                        String(data.model.totalObservations ?? data.model.observations),
                                     ],
                                     [
                                         "Productivity estimate",
@@ -587,7 +589,7 @@ export default function LearningPanel({
                                 </summary>
                                 <p style={muted}>
                                     {data.model.algorithm} ·{" "}
-                                    {data.model.observations} real observations.
+                                    {data.model.totalObservations ?? data.model.observations} training observations.
                                 </p>
                                 {weights.map((w) => (
                                     <div

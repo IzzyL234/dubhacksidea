@@ -15,3 +15,14 @@ test('browser preflight is read-only and grants only configured origins',async()
 test('dashboard codes are hashed, deduplicated, scoped and revocable',async()=>{const d=await mkdtemp(join(tmpdir(),'dashboard-access-'));dirs.push(d);const writes:{url:string;init:RequestInit}[]=[];const access=new DashboardAccess('https://example.supabase.co','sb_secret_test',async(url,init)=>{writes.push({url,init:init!});return new Response(null,{status:201});},d,()=>now);
  const replies=await Promise.all([access.handle('private-chat','dashboard code','one'),access.handle('private-chat','dashboard code','one')]);expect(replies[0]).toBe(replies[1]);expect(writes).toHaveLength(1);const body=JSON.parse(String(writes[0]?.init.body));const raw=replies[0]!.split('\n')[1]!;expect(raw).toHaveLength(43);expect(body.token_hash).toBe(createHash('sha256').update(raw).digest('hex'));expect(String(writes[0]?.init.body)).not.toContain(raw);expect(String(writes[0]?.init.body)).not.toContain('private-chat');await access.handle('private-chat','disconnect dashboard','two');expect(writes[1]?.init.method).toBe('DELETE');expect(writes[1]?.url).toContain(body.user_key);
 });
+
+test('website model combines starter examples and real feedback without adding fake personal history',async()=>{
+ const rows=JSON.parse(await Bun.file('data/seed_sessions.json').text());
+ const {train}=await import('../src/learning.ts');
+ const initial=buildDashboardSnapshot(user,[],[],[],now,rows);
+ expect(initial.model.totalObservations).toBe(40);expect(initial.model.observations).toBe(0);expect(initial.history).toEqual([]);expect(initial.model.weights.length).toBeGreaterThan(0);expect(initial.prediction).not.toBeNull();
+ const combined=buildDashboardSnapshot(user,[pair()],[],[],now,rows);
+ expect(combined.model.totalObservations).toBe(41);expect(combined.history).toHaveLength(1);
+ const expected=train(rows).learner;const p=pair();expected.observe({id:p.feedback_record.id,timestamp:p.session_record.started_at,duration_mins:45,location:'library',study_space:'desk',environment:{clutter_score:3,lighting:'bright',ergonomics:7},user_productivity_rating:5,user_mood_rating:4});
+ expect(combined.prediction?.productivity).toBe(Math.round(expected.predict({timestamp:p.session_record.started_at,duration_mins:45,location:'library',study_space:'desk',environment:{clutter_score:3,lighting:'bright',ergonomics:7}}).predictedProductivity*100)/100);
+});

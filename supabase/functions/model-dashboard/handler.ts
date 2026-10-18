@@ -1,3 +1,4 @@
+import demoRows from "../../../data/seed_sessions.json";
 import {buildDashboardSnapshot} from '../../../src/dashboard-snapshot.ts';
 type Settings={url:string;serviceKey:string;allowedOrigins:string[];now?:()=>number};
 const sha=async(s:string)=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))].map(n=>n.toString(16).padStart(2,'0')).join('');
@@ -21,7 +22,7 @@ export function createDashboardHandler(settings:Settings,request:(url:string,ini
    const history=async()=>{const all:unknown[]=[];for(let offset=0;offset<10000;offset+=500){const page=await read(`study_learning_history?select=session_record,feedback_record&user_id=eq.${user}&order=feedback_id.asc&limit=500&offset=${offset}`);if(page.length>500)throw Error();all.push(...page);if(page.length<500)return all;}throw Error('History limit');};
    const result=await Promise.allSettled([history(),read(`proactivity_events?select=user_key,reported_at,action,reason,occurrence_count&user_key=eq.${user}&order=reported_at.desc&limit=15`),read(`study_sessions?select=user_id,is_synthetic,status,started_at,duration_mins,location,study_space,environment&user_id=eq.${user}&is_synthetic=eq.false&status=in.(active,awaiting_feedback)&order=started_at.desc&limit=1`)]);
    if(result.some(r=>r.status==='rejected'))return reply(502,{error:'Dashboard data is temporarily unavailable. Your existing data has not changed.'});
-   const values=result.map(r=>(r as PromiseFulfilledResult<any[]>).value);return reply(200,buildDashboardSnapshot(user,values[0]!,values[1]!,values[2]!, (settings.now??Date.now)()));
+   const values=result.map(r=>(r as PromiseFulfilledResult<any[]>).value);return reply(200,buildDashboardSnapshot(user,values[0]!,values[1]!,values[2]!, (settings.now??Date.now)(),demoRows));
   }catch{return reply(502,{error:'Dashboard data is temporarily unavailable. Check backend setup or try again shortly.'});}
  };
 }
