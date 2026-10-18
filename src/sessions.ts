@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { features, LOCATIONS, SPACES, train, type Context } from "./learning.ts";
+import { features, LOCATIONS, SPACES, StudyLearner, train, type Candidate, type Context, type SerializedModelState } from "./learning.ts";
 import { analyzePhoto, validateWorkspace, type Workspace } from "./vision.ts";
 import type { SessionFeedback } from "./feedback.ts";
 
@@ -13,8 +13,26 @@ export type StudySession = {
   status: "active" | "awaiting_feedback" | "completed" | "canceled";
   feedback_id: string | null; is_synthetic: false;
 };
+
+export type PhotoLogEntry = {
+  id: string;
+  user_id?: string;
+  session_id: string | null;
+  timestamp: string;
+  location: Context["location"] | null;
+  study_space: Context["study_space"] | null;
+  duration_mins: number | null;
+  perceptron_tags: Workspace;
+  source: "perceptron";
+};
+
 type Document = { sessions: StudySession[]; replies: { id: string; text: string }[] };
-export interface SessionSink { put(session: StudySession): Promise<void> }
+export interface SessionSink {
+  put(session: StudySession): Promise<void>;
+  putPhotoLog?(entry: PhotoLogEntry): Promise<void>;
+  getModelParams?(userId: string): Promise<SerializedModelState | null>;
+  putModelParams?(state: SerializedModelState): Promise<void>;
+}
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 export function observationWeight(feedback: SessionFeedback): number {
   return feedback.distraction_rating >= 4 && ["phone", "other"].includes(feedback.distraction_source ?? "") ? 0.25 : 1;
@@ -37,6 +55,53 @@ export class SupabaseSessions implements SessionSink {
     });
     if (!result.ok) throw new Error(`Session upload failed (HTTP ${result.status}); run supabase/004_session_lifecycle.sql`);
   }
+  async putPhotoLog(entry: PhotoLogEntry) {
+    const loc = entry.location ?? "home";
+    const sp = entry.study_space ?? "desk";
+    const body = {
+      id: entry.id,
+      user_id: entry.user_id ?? "default_user",
+      session_id: entry.session_id,
+      timestamp: entry.timestamp,
+      duration_mins: entry.duration_mins ?? 45,
+      location: loc,
+      study_space: sp,
+      location_class: `${loc}_${sp}`,
+      peceptron_tags: entry.perceptron_tags,
+      linucb_metrics: {},
+      source: entry.source,
+    };
+    await fetch(`${this.url}/rest/v1/workspace_photos_log?on_conflict=id`, {
+      method: "POST",
+      headers: { apikey: this.key, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(body),
+      redirect: "error",
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => {});
+  }
+  async getModelParams(userId: string): Promise<SerializedModelState | null> {
+    try {
+      const res = await fetch(`${this.url}/rest/v1/user_model_params?user_id=eq.${encodeURIComponent(userId)}&select=*&limit=1`, {
+        headers: { apikey: this.key },
+        redirect: "error",
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) return null;
+      const rows = (await res.json()) as SerializedModelState[];
+      return Array.isArray(rows) && rows.length > 0 ? rows[0]! : null;
+    } catch {
+      return null;
+    }
+  }
+  async putModelParams(state: SerializedModelState): Promise<void> {
+    await fetch(`${this.url}/rest/v1/user_model_params?on_conflict=user_id`, {
+      method: "POST",
+      headers: { apikey: this.key, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(state),
+      redirect: "error",
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => {});
+  }
 }
 export function configuredSessions(): SessionSink | null {
   return process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY
@@ -48,7 +113,8 @@ export class StudySessions {
     private sink: SessionSink | null = configuredSessions(),
     private feedbackDirectory = fileURLToPath(new URL("../data/feedback/records/", import.meta.url)),
     private seedFile = fileURLToPath(new URL("../data/seed_sessions.json", import.meta.url)),
-    private vision = analyzePhoto) {}
+    private vision = analyzePhoto,
+    private photosLogFile = fileURLToPath(new URL("../data/photos_log.json", import.meta.url))) {}
   private async serialized<T>(key: string, action: () => Promise<T>): Promise<T> {
     const before = this.locks.get(key) ?? Promise.resolve();
     const operation = before.catch(() => {}).then(action);
@@ -64,13 +130,35 @@ export class StudySessions {
     const path = join(this.directory,`${key}.json`), temp = `${path}.${randomUUID()}.tmp`;
     await writeFile(temp,JSON.stringify(document),{mode:0o600}); await rename(temp,path);
   }
+  private async appendPhotoLog(entry: PhotoLogEntry) {
+    await this.sink?.putPhotoLog?.(entry);
+    try {
+      let existing: PhotoLogEntry[] = [];
+      try {
+        const parsed = JSON.parse(await readFile(this.photosLogFile, "utf8"));
+        if (Array.isArray(parsed)) existing = parsed;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+      }
+      existing.push(entry);
+      const temp = `${this.photosLogFile}.${randomUUID()}.tmp`;
+      await writeFile(temp, JSON.stringify(existing, null, 2), { mode: 0o600 });
+      await rename(temp, this.photosLogFile);
+    } catch {
+      // Do not fail session flow if auxiliary photo log cannot be written
+    }
+  }
   async syncPending(): Promise<void> {
     if (!this.sink) return;
     let names: string[];
     try { names = await readdir(this.directory); } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return; throw e; }
     for (const name of names.filter(n=>/^[a-f0-9]{64}\.json$/.test(n))) {
       const key=name.slice(0,-5);
-      await this.serialized(key, async()=> { for (const session of (await this.read(key)).sessions) await this.sink!.put(session); });
+      await this.serialized(key, async()=> {
+        const doc = await this.read(key);
+        for (const session of doc.sessions) await this.sink!.put(session);
+        await this.buildPersonalLearner(key, doc);
+      });
     }
   }
   // Capture the exact session at check-in start, before any later session can be created.
@@ -92,6 +180,8 @@ export class StudySessions {
       if (session.feedback_id && session.feedback_id!==record.id) throw new Error("Session already rated");
       session.feedback_id=record.id; session.status="completed";
       await this.save(record.conversation_key,doc);
+      // Immediately update and sync the user's LinUCB model parameters in Supabase
+      await this.buildPersonalLearner(record.conversation_key, doc);
     });
   }
   async ensureCloud(record: SessionFeedback): Promise<void> {
@@ -131,6 +221,8 @@ export class StudySessions {
         if(!active) reply="Start a study session first.";
         else if(!sessionContext(active)) reply="I need complete workspace context first. Send a photo or text workspace bright 3 7 (lighting, clutter 1–10, comfort 1–10).";
         else reply=await this.score(key,active,doc);
+      } else if(command==="recommend space" || command==="recommend" || command==="recommendations") {
+        reply=await this.recommend(key, doc);
       } else if(active) {
         const parts=command.split(/\s+/);
         if(parts.length===3 && LOCATIONS.includes(parts[0] as any) && SPACES.includes(parts[1] as any)) {
@@ -163,24 +255,100 @@ export class StudySessions {
       if(!["image/jpeg","image/png","image/webp"].includes(mime))return "Please send a JPEG, PNG, or WebP photo.";
       const environment=await this.vision(await read(),mime);
       session.environment=environment;session.environment_source="perceptron";
+      await this.appendPhotoLog({
+        id: messageId,
+        user_id: key,
+        session_id: session.id,
+        timestamp: new Date().toISOString(),
+        location: session.location,
+        study_space: session.study_space,
+        duration_mins: session.duration_mins,
+        perceptron_tags: environment,
+        source: "perceptron",
+      });
       const reply=`Perceptron estimates: ${environment.lighting} lighting, clutter ${environment.clutter_score}/10.${environment.ergonomics===null?" I couldn't assess seating/posture. Reply comfort 7 with your comfort from 1–10.":` Visible ergonomics ${environment.ergonomics}/10.`} You can correct these with workspace bright 3 7. Text done when finished.`;
       doc.replies=[...doc.replies,{id:messageId,text:reply}].slice(-40);await this.save(key,doc);return reply;
     });
   }
-  private async score(key: string, current: StudySession, doc: Document): Promise<string> {
+  private async buildPersonalLearner(key: string, doc: Document) {
     const rows=JSON.parse(await readFile(this.seedFile,"utf8"));
-    const {learner}=train(rows);
+    let learner: StudyLearner;
+    let visitCounts: Map<string, number>;
+    let version = 1;
+
+    // 1. Load user's saved model parameters from Supabase if available
+    const cloudState = await this.sink?.getModelParams?.(key) ?? null;
+    const restored = cloudState ? StudyLearner.fromState(cloudState) : null;
+    if (restored) {
+      learner = restored.learner;
+      visitCounts = restored.visitCounts;
+      version = restored.version;
+    } else {
+      const trained = train(rows);
+      learner = trained.learner;
+      visitCounts = new Map<string, number>();
+      for (const obs of trained.observations) {
+        const k = `${obs.location}:${obs.study_space}`;
+        visitCounts.set(k, (visitCounts.get(k) ?? 0) + 1);
+      }
+    }
+
     let names:string[]=[];
     try{names=await readdir(this.feedbackDirectory);}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
     let personal=0;
+    let addedNew=false;
     for(const name of names.filter(n=>/^[a-f0-9-]{36}\.json$/i.test(n)).sort()) {
       const feedback=JSON.parse(await readFile(join(this.feedbackDirectory,name),"utf8")) as SessionFeedback;
       if(feedback.conversation_key!==key||!feedback.session_id)continue;
       const session=doc.sessions.find(s=>s.id===feedback.session_id&&s.status==="completed"&&s.feedback_id===feedback.id);
       const context=session&&sessionContext(session);if(!context)continue;
-      learner.observe({...context,id:feedback.id,user_productivity_rating:feedback.productivity_rating,user_mood_rating:feedback.mood_rating},observationWeight(feedback));personal++;
+      personal++;
+      if (!learner.hasObserved(feedback.id)) {
+        learner.observe({...context,id:feedback.id,user_productivity_rating:feedback.productivity_rating,user_mood_rating:feedback.mood_rating},observationWeight(feedback));
+        const k = `${context.location}:${context.study_space}`;
+        visitCounts.set(k, (visitCounts.get(k) ?? 0) + 1);
+        addedNew = true;
+      }
     }
+    if (addedNew || !cloudState) {
+      const nextVersion = addedNew ? version + 1 : version;
+      await this.sink?.putModelParams?.(learner.toState(key, visitCounts, nextVersion));
+    }
+    return { learner, rowsCount: rows.length, personal, visitCounts };
+  }
+  private async score(key: string, current: StudySession, doc: Document): Promise<string> {
+    const {learner, rowsCount, personal}=await this.buildPersonalLearner(key, doc);
     const prediction=learner.predict(sessionContext(current)!);
-    return `Estimated productivity ${prediction.predictedProductivity.toFixed(1)}/5, mood ${prediction.predictedMood.toFixed(1)}/5. Based on ${rows.length} synthetic starter examples + ${personal} of your linked check-ins. These are associations, not guarantees. Planned duration is used; actual elapsed time is stored separately.`;
+    return `Estimated productivity ${prediction.predictedProductivity.toFixed(1)}/5, mood ${prediction.predictedMood.toFixed(1)}/5. Based on ${rowsCount} synthetic starter examples + ${personal} of your linked check-ins. These are associations, not guarantees. Planned duration is used; actual elapsed time is stored separately.`;
+  }
+  private async recommend(key: string, doc: Document): Promise<string> {
+    const {learner, visitCounts}=await this.buildPersonalLearner(key, doc);
+    const timestamp = new Date().toISOString();
+    const typicalEnv: Record<Context["study_space"], Context["environment"]> = {
+      desk: { clutter_score: 2, lighting: "bright", ergonomics: 8 },
+      shared_table: { clutter_score: 3, lighting: "bright", ergonomics: 7 },
+      chair: { clutter_score: 3, lighting: "bright", ergonomics: 6 },
+      beanbag: { clutter_score: 5, lighting: "dim", ergonomics: 4 },
+      bed: { clutter_score: 7, lighting: "dim", ergonomics: 2 },
+    };
+    const candidates: Candidate[] = [];
+    for (const loc of LOCATIONS) {
+      for (const sp of SPACES) {
+        if (sp === "bed" && ["library", "classroom", "cafe"].includes(loc)) continue;
+        candidates.push({
+          id: `${loc}:${sp}`,
+          label: `${loc.replace("_", " ")} ${sp.replace("_", " ")}`,
+          timestamp,
+          duration_mins: 45,
+          location: loc,
+          study_space: sp,
+          environment: typicalEnv[sp],
+        });
+      }
+    }
+    const ranked = learner.rank(candidates, { alpha: 0.35 });
+    const topKnown = ranked.find(c => (visitCounts.get(c.id) ?? 0) > 1) ?? ranked[0]!;
+    const topUnexplored = ranked.find(c => (visitCounts.get(c.id) ?? 0) <= 1);
+    return `LinUCB Study Space Recommendations:\n• Best proven space: ${topKnown.label} (pred. productivity ${topKnown.predictedProductivity.toFixed(1)}/5, score ${topKnown.selectionScore.toFixed(2)})${topUnexplored ? `\n• Recommended unexplored fit: ${topUnexplored.label} (LinUCB score ${topUnexplored.selectionScore.toFixed(2)}, exploration bonus +${topUnexplored.explorationBonus.toFixed(2)})` : ""}`;
   }
 }

@@ -1,11 +1,21 @@
 // bridge/photon.mjs
-// Photon Spectrum Cloud Bridge
-// Connects to your dedicated Photon cloud phone number using SPECTRUM_PROJECT_ID & SPECTRUM_PROJECT_SECRET.
-// Does NOT touch local chat.db or require Full Disk Access!
+// Unified Photon Spectrum Cloud Bridge:
+// 1. Photo is sent -> Relays to Perceptron VLM backend (`analyze_workspace.py`) with per-user `user_id`,
+//    logs photo metadata to Supabase (`public.workspace_photos_log`),
+//    scores the study space with the user's LinUCB model (`public.user_model_params`),
+//    and replies with Focus Score + Proven/Unexplored recommendations.
+// 2. Links the photo session to `StudySessions` and triggers follow-up rating check-in (`FeedbackFlow`)
+//    when the user finishes studying ("done" / "rate session") or chats with Grok (`XAI_API_KEY`).
 
 import { Spectrum } from 'spectrum-ts';
 import { imessage } from '@spectrum-ts/imessage';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import { StudySessions } from '../src/sessions.ts';
+import { FeedbackFlow } from '../src/feedback.ts';
+import { inboundMessages } from '../src/inbound.ts';
+
+const hashUser = (spaceId) => createHash('sha256').update(String(spaceId)).digest('hex');
 
 // Load .env if present
 if (fs.existsSync('.env')) {
@@ -24,24 +34,63 @@ if (fs.existsSync('.env')) {
 }
 
 const {
+  PROJECT_ID,
+  PROJECT_SECRET,
   SPECTRUM_PROJECT_ID,
   SPECTRUM_PROJECT_SECRET,
-  BACKEND_URL = 'http://127.0.0.1:8000'
+  BACKEND_URL = 'http://127.0.0.1:8000',
+  XAI_API_KEY
 } = process.env;
 
-if (!SPECTRUM_PROJECT_ID || !SPECTRUM_PROJECT_SECRET) {
+const projectId = PROJECT_ID || SPECTRUM_PROJECT_ID;
+const projectSecret = PROJECT_SECRET || SPECTRUM_PROJECT_SECRET;
+
+if (!projectId || !projectSecret) {
   console.error('❌ Error: SPECTRUM_PROJECT_ID and SPECTRUM_PROJECT_SECRET are required in .env');
   process.exit(1);
 }
 
 console.log('🚀 Connecting to Photon Spectrum Cloud...');
-console.log(`📱 Project ID: ${SPECTRUM_PROJECT_ID}`);
-console.log(`📡 Backend URL: ${BACKEND_URL}`);
+console.log(`📱 Project ID: ${projectId}`);
+console.log(`📡 Perceptron + LinUCB Backend URL: ${BACKEND_URL}`);
 
-async function sendToPerceptronBackend(imageBuffer, mimeType = 'image/jpeg') {
+// Initialize shared StudySessions & FeedbackFlow for training the per-user LinUCB model
+const studySessions = new StudySessions();
+const feedbackFlow = new FeedbackFlow(undefined, undefined, {
+  begin: (key) => studySessions.beginFeedback(key),
+  afterSave: async (record) => {
+    await studySessions.completeFeedback(record);
+    // Sync completed rating back to the FastAPI per-user LinUCB model & Supabase
+    try {
+      await fetch(`${BACKEND_URL}/api/rate-session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: record.session_id || record.id,
+          user_id: record.conversation_key,
+          actual_rating: record.productivity_rating,
+          mood_rating: record.mood_rating,
+          distraction_rating: record.distraction_rating,
+          distraction_source: record.distraction_source
+        }),
+        signal: AbortSignal.timeout(10000)
+      });
+      console.log(`📈 Updated per-user LinUCB model (${record.conversation_key.slice(0, 8)}...): Productivity=${record.productivity_rating}/5, Mood=${record.mood_rating}/5`);
+    } catch (e) {
+      console.warn('Could not sync rating to FastAPI backend:', e.message);
+    }
+  },
+  beforeUpload: (record) => studySessions.ensureCloud(record)
+});
+
+// Track latest analyzed photo session ID per space so quick ratings link cleanly
+const latestPhotoSessionBySpace = new Map();
+
+async function sendToPerceptronBackend(imageBuffer, mimeType = 'image/jpeg', userId = 'default_user') {
   const formData = new FormData();
   const blob = new Blob([imageBuffer], { type: mimeType });
   formData.append('file', blob, 'workspace_photo.jpg');
+  formData.append('user_id', userId);
 
   const res = await fetch(`${BACKEND_URL}/analyze-workspace`, {
     method: 'POST',
@@ -57,105 +106,159 @@ async function sendToPerceptronBackend(imageBuffer, mimeType = 'image/jpeg') {
   return await res.json();
 }
 
-async function sendRatingFeedback(sessionId, rating) {
-  const res = await fetch(`${BACKEND_URL}/api/rate-session`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      session_id: sessionId,
-      actual_rating: rating
-    }),
-    signal: AbortSignal.timeout(10000)
-  });
-
-  if (!res.ok) throw new Error(`Rating failed (${res.status})`);
-  return await res.json();
+async function triggerGrokFollowUpPrompt(analysis) {
+  if (!XAI_API_KEY) return null;
+  try {
+    const response = await fetch('https://api.x.ai/v1/responses', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${XAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      signal: AbortSignal.timeout(25000),
+      body: JSON.stringify({
+        model: process.env.XAI_MODEL ?? 'grok-4.7',
+        instructions:
+          'You are a friendly personal study assistant. The user just sent a photo of their study workspace, which was scored by Perceptron and our LinUCB model. Write a short 1-2 sentence encouraging follow-up asking them to text "rate session" or "done" when they finish studying to rate their productivity (1-5), mood (1-5), and distractions so we can train their personal study space recommender.',
+        input: `Workspace detected: ${analysis.location} (${analysis.study_space}), lighting: ${analysis.lighting_quality}, clutter: ${analysis.clutter_score}/10, focus score: ${analysis.focus_score}/100.`
+      })
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const reply = (data.output ?? [])
+      .filter((item) => item.type === 'message')
+      .flatMap((item) => item.content ?? [])
+      .filter((part) => part.type === 'output_text')
+      .map((part) => part.text ?? '')
+      .join('\n')
+      .trim();
+    return reply || null;
+  } catch {
+    return null;
+  }
 }
 
 try {
   const app = await Spectrum({
-    projectId: SPECTRUM_PROJECT_ID,
-    projectSecret: SPECTRUM_PROJECT_SECRET,
+    projectId,
+    projectSecret,
     providers: [imessage.config()]
   });
 
   console.log('✅ Photon Spectrum successfully connected to your phone number!');
-  console.log('👂 Listening for incoming photos & messages...');
+  console.log('👂 Listening for workspace photos & follow-up ratings...');
 
-  for await (const [space, message] of app.messages) {
-    // Only process inbound messages sent to your Photon number
-    if (message.direction !== 'inbound') continue;
+  for await (const [space, envelope] of app.messages) {
+    for (const message of inboundMessages(envelope)) {
+      if (message.direction !== 'inbound') continue;
+      const userKey = hashUser(space.id);
 
-    console.log(`📩 Incoming message (ID: ${message.id}, Type: ${message.content.type})`);
-
-    try {
-      // 1. Photo Attachment Received
+      // 1. Handle Photo Attachment -> Perceptron VLM -> Supabase Photo Log -> Per-User LinUCB Score -> Follow-up Trigger
       if (message.content.type === 'attachment') {
         const att = message.content;
-        console.log(`📷 Photo received: ${att.name || 'attachment'} (${att.mimeType})`);
+        const mime = (att.mimeType || '').toLowerCase();
+        const name = (att.name || '').toLowerCase();
 
-        await space.responding(async () => {
-          await message.reply('🔄 Analyzing your workspace photo with Perceptron VLM... one moment!');
-        });
+        const isImage =
+          mime.startsWith('image/') ||
+          ['.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp'].some((ext) => name.endsWith(ext));
 
-        // Read attachment bytes
-        const buffer = await att.read();
-        const analysis = await sendToPerceptronBackend(buffer, att.mimeType || 'image/jpeg');
+        if (!isImage) continue;
 
-        console.log(`🎯 Analysis complete! Focus Score: ${analysis.focus_score}/100`);
+        console.log(`📷 Photo received from user ${userKey.slice(0, 8)}...: ${att.name || 'image'} (${att.mimeType})`);
 
-        await space.responding(async () => {
-          await message.reply(analysis.reply_text);
-        });
+        try {
+          await space.responding(async () => {
+            await message.reply('🔄 Analyzing your workspace photo with Perceptron VLM & your personal LinUCB model... one moment!');
+          });
+
+          const buffer = await att.read();
+          const analysis = await sendToPerceptronBackend(buffer, att.mimeType || 'image/jpeg', userKey);
+          latestPhotoSessionBySpace.set(space.id, analysis.session_id);
+
+          // Ensure a linked StudySession is active & populated with Perceptron context for `feedbackFlow`
+          await studySessions.handle(space.id, 'start studying', `${message.id}:autostart`);
+          const validLoc = ['home', 'dorm_room', 'library', 'classroom', 'cafe'].includes(analysis.location)
+            ? analysis.location
+            : 'library';
+          const validSpace = ['chair', 'desk', 'shared_table', 'bed', 'beanbag'].includes(analysis.study_space)
+            ? analysis.study_space
+            : 'desk';
+          await studySessions.handle(space.id, `${validLoc} ${validSpace} 45`, `${message.id}:autocontext`);
+          await studySessions.handle(
+            space.id,
+            `workspace ${analysis.lighting_quality} ${Math.max(1, analysis.clutter_score)} ${Math.max(1, analysis.ergonomics_score)}`,
+            `${message.id}:autoenv`
+          );
+
+          console.log(`🎯 Analysis logged & scored for user ${userKey.slice(0, 8)}...! Session: ${analysis.session_id}, Focus Score: ${analysis.focus_score}/100`);
+
+          // Send Perceptron + LinUCB score reply
+          await space.responding(async () => {
+            await message.reply(analysis.reply_text);
+          });
+
+          // Trigger Grok follow-up / rating check-in prompt
+          const grokFollowUp = await triggerGrokFollowUpPrompt(analysis);
+          if (grokFollowUp) {
+            await space.send(grokFollowUp);
+          }
+        } catch (err) {
+          console.error('❌ Error analyzing workspace photo:', err);
+          try {
+            await space.responding(async () => {
+              await message.reply(`⚠️ Error analyzing photo: ${err.message}`);
+            });
+          } catch {}
+        }
         continue;
       }
 
-      // 2. Text Command Received
+      // 2. Handle Follow-up Rating Check-ins & Study Session Commands
       if (message.content.type === 'text') {
         const text = message.content.text.trim();
-        const lower = text.toLowerCase();
+        if (!text) continue;
 
-        // Rate command
-        const rateMatch = text.match(/rate\s+([a-zA-Z0-9_-]+)\s+([1-5](\.\d+)?)/i);
-        if (rateMatch) {
-          const sessId = rateMatch[1];
-          const score = parseFloat(rateMatch[2]);
-          await sendRatingFeedback(sessId, score);
-          await space.responding(async () => {
-            await message.reply(`✅ Recorded! Session ${sessId} rated ${score}/5. ML model parameters updated.`);
-          });
-          continue;
+        try {
+          // Direct inline rating e.g. "rate sess_abc123 5"
+          const rateMatch = text.match(/^rate\s+(sess_[a-zA-Z0-9_-]+)\s+([1-5](?:\.\d+)?)(?:\s+([1-5](?:\.\d+)?))?$/i);
+          if (rateMatch) {
+            const sessId = rateMatch[1];
+            const prodRating = parseFloat(rateMatch[2]);
+            const moodRating = rateMatch[3] ? parseFloat(rateMatch[3]) : prodRating;
+            await fetch(`${BACKEND_URL}/api/rate-session`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                session_id: sessId,
+                user_id: userKey,
+                actual_rating: prodRating,
+                mood_rating: moodRating
+              })
+            });
+            await space.send(`✅ Saved rating for ${sessId} (Productivity: ${prodRating}/5, Mood: ${moodRating}/5)! Your personal LinUCB study space recommender has been updated in Supabase.`);
+            continue;
+          }
+
+          // Existing multi-step FeedbackFlow ("done", "rate session", or 1-5 replies during an active check-in)
+          const feedbackReply = await feedbackFlow.handle(space.id, text, message.id);
+          if (feedbackReply !== null) {
+            await space.send(feedbackReply);
+            continue;
+          }
+
+          // Existing StudySessions commands ("study score", "recommend space", "study status", "discard session")
+          const sessionReply = await studySessions.handle(space.id, text, message.id);
+          if (sessionReply !== null) {
+            await space.send(sessionReply);
+            continue;
+          }
+        } catch (err) {
+          console.error('❌ Error in follow-up handler:', err);
         }
-
-        if (lower === 'help' || lower === 'start' || lower === 'score') {
-          await space.responding(async () => {
-            await message.reply(
-              '👋 Welcome to Workspace Focus AI!\n\n' +
-              '📸 Snap and text a photo of your desk or study space to this number.\n' +
-              'Our Perceptron vision model will measure your lighting, clutter, and distractions to give you an instant Focus Score!\n\n' +
-              'Reply "rate <session_id> <1-5>" after studying to tune your model.'
-            );
-          });
-          continue;
-        }
-
-        // Default text fallback
-        await space.responding(async () => {
-          await message.reply('📸 Send a photo of your desk or study space to get your real-time Focus Score!');
-        });
-      }
-    } catch (err) {
-      console.error('❌ Error handling message:', err);
-      try {
-        await space.responding(async () => {
-          await message.reply(`⚠️ Error: ${err.message}`);
-        });
-      } catch (replyErr) {
-        console.error('Failed to send error reply:', replyErr);
       }
     }
   }
-
 } catch (err) {
   console.error('❌ Fatal Spectrum Cloud error:', err);
   process.exit(1);

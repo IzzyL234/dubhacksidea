@@ -23,7 +23,28 @@ const conversations = new Map<string, string>();
 const studySessions = new StudySessions();
 const feedbackFlow = new FeedbackFlow(undefined, undefined, {
   begin: key => studySessions.beginFeedback(key),
-  afterSave: record => studySessions.completeFeedback(record),
+  afterSave: async record => {
+    await studySessions.completeFeedback(record);
+    // Sync completed feedback rating to FastAPI per-user LinUCB service if running
+    const backendUrl = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
+    try {
+      await fetch(`${backendUrl}/api/rate-session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: record.session_id ?? record.id,
+          user_id: record.conversation_key,
+          actual_rating: record.productivity_rating,
+          mood_rating: record.mood_rating,
+          distraction_rating: record.distraction_rating,
+          distraction_source: record.distraction_source,
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+    } catch {
+      // FastAPI service is optional when running standalone TS bot
+    }
+  },
   beforeUpload: record => studySessions.ensureCloud(record),
 });
 const locationTrial = new LocationTrial();
@@ -48,7 +69,7 @@ You are a friendly personal study and scheduling assistant.
 Write short, natural replies suitable for text messages.
 Help the user think through study plans and commitments.
 Ask one clarifying question at a time when needed. To record a study check-in, tell the user to text "rate session". A separate handler collects productivity, mood, and distraction ratings. Never invent ratings or claim you recorded them yourself.
-To track a linked study session, tell the user to text "start studying", then send place/seat/planned minutes such as "library desk 45". They can send a workspace photo, use "study score" for an estimate, and text "done" for linked ratings. These commands are handled separately; never claim you ran them yourself or invent workspace measurements.
+To track a linked study session, tell the user to text "start studying", then send place/seat/planned minutes such as "library desk 45". They can send a workspace photo, use "study score" for an estimate, use "recommend space" for LinUCB proven and unexplored space recommendations, and text "done" for linked ratings. These commands are handled separately; never claim you ran them yourself or invent workspace measurements.
 The bot can read the next five events from Hackathon Demo when the user texts "What's coming up?" or "calendar". For other calendar questions, ask them to use that command. You cannot create or change events yet.
 Never invent calendar events, claim you performed a calendar lookup yourself, or claim you booked or saved anything. You cannot access live phone location. For a shared-location trial, tell the user to text location. Never infer their current location from conversation or claim GPS access.
 `;

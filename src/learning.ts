@@ -74,6 +74,20 @@ function validateObservation(observation: Observation): void {
   }
 }
 
+export type SerializedModelState = {
+  user_id: string;
+  version: number;
+  observations_count: number;
+  inverse_matrix: number[][];
+  productivity_weights: number[];
+  mood_weights: number[];
+  theta_productivity: number[];
+  theta_mood: number[];
+  combination_counts: Record<string, number>;
+  observed_ids: string[];
+  updated_at: string;
+};
+
 export class StudyLearner {
   private inverse: number[][];
   private productivity = Array<number>(dimension).fill(0);
@@ -103,6 +117,45 @@ export class StudyLearner {
     this.mood = this.mood.map((value, i) => value + sampleWeight * x[i]! * m);
     this.inverse = next;
     this.ids.add(observation.id);
+  }
+
+  hasObserved(id: string): boolean {
+    return this.ids.has(id);
+  }
+
+  toState(userId: string, visitCounts: Map<string, number>, version = 1): SerializedModelState {
+    const thetaP = multiply(this.inverse, this.productivity).map(v => Math.round(v * 10000) / 10000);
+    const thetaM = multiply(this.inverse, this.mood).map(v => Math.round(v * 10000) / 10000);
+    return {
+      user_id: userId,
+      version,
+      observations_count: this.count,
+      inverse_matrix: this.inverse,
+      productivity_weights: this.productivity,
+      mood_weights: this.mood,
+      theta_productivity: thetaP,
+      theta_mood: thetaM,
+      combination_counts: Object.fromEntries(visitCounts.entries()),
+      observed_ids: Array.from(this.ids),
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  static fromState(state: SerializedModelState): { learner: StudyLearner; visitCounts: Map<string, number>; version: number } | null {
+    if (!state || !Array.isArray(state.inverse_matrix) || state.inverse_matrix.length !== dimension
+        || !Array.isArray(state.productivity_weights) || state.productivity_weights.length !== dimension
+        || !Array.isArray(state.mood_weights) || state.mood_weights.length !== dimension) {
+      return null;
+    }
+    const learner = new StudyLearner();
+    learner.inverse = state.inverse_matrix.map(r => r.map(Number));
+    learner.productivity = state.productivity_weights.map(Number);
+    learner.mood = state.mood_weights.map(Number);
+    learner.ids = new Set((state.observed_ids ?? []).map(String));
+    const visitCounts = new Map<string, number>(
+      Object.entries(state.combination_counts ?? {}).map(([k, v]) => [k, Number(v)])
+    );
+    return { learner, visitCounts, version: Number(state.version ?? 1) };
   }
 
   predict(context: Context, policy: Policy = {}) {
