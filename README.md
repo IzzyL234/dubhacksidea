@@ -36,16 +36,20 @@ bun scripts/learning-demo.ts
 bun test tests/learning.test.ts tests/feedback.test.ts tests/feedback-cloud.test.ts
 ```
 
-The learning demo uses 40 synthetic records, two ridge reward predictors, and LinUCB ranking. It prints predictions, a chronological holdout comparison, and an illustrative update. See `LEARNING.md` for the model and its limits. It does not claim learned time-of-day preferences. The learner is not yet connected to the bot's feedback records.
+The learning demo uses 40 synthetic records, two ridge reward predictors, and LinUCB ranking. It prints predictions, a chronological holdout comparison, and an illustrative update. See `LEARNING.md` for the model and its limits. It does not claim learned time-of-day preferences. Completed linked check-ins now personalize the learner; see `SESSIONS.md` for the start/photo/done flow and required migration.
 
 ## Supabase status
 
 Optional backend settings are `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (a key starting `sb_secret_`). Run `bun supabase-test.mjs` to test read access to `public.study_sessions`. The table setup is in `supabase/001_study_sessions.sql`.
 
-Run `supabase/002_study_feedback.sql` in Supabase SQL Editor, then `bun scripts/sync-feedback.ts` to check the connection and upload pending check-ins. The bot saves feedback locally first and retries Supabase uploads every minute. UUIDs prevent duplicate rows. Completed check-ins and unfinished conversations persist privately under `data/feedback/`. They are not yet linked to study context or automatically used to train the model. Calendar creation and proactive notifications are future steps.
+Run `supabase/002_study_feedback.sql` in Supabase SQL Editor, then `bun scripts/sync-feedback.ts` to check the connection and upload pending check-ins. The bot saves feedback locally first and retries Supabase uploads every minute. UUIDs prevent duplicate rows. Completed check-ins and unfinished conversations persist privately under `data/feedback/`. Standalone check-ins remain unlinked. New linked study sessions can personalize predictions after `supabase/004_session_lifecycle.sql` is applied. Calendar creation and proactive notifications are future steps.
 
 ## Private files
 
 Never commit `.env`, `credentials.json`, `.google-calendar-token.json`, or `data/feedback/`. Each teammate supplies credentials locally; the example environment file contains names only. Run one bot process for this local feedback store.
 
 The root `generate_seed_sessions.py`, `seed_sessions.json`, and `analyze_workspace.py` are the team's existing data/vision work. The bot does not currently call the vision service.
+
+## Linked study sessions
+
+Text `start studying`, supply place/seat/planned minutes (for example `library desk 45`), then send a photo or self-reported workspace details. `study score` gives an estimate; `done` collects linked ratings. Run `supabase/004_session_lifecycle.sql` first. Photos need `PERCEPTRON_API_KEY`; setup and limitations are in `SESSIONS.md`.

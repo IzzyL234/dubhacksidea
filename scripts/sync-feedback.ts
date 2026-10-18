@@ -1,3 +1,4 @@
+import { StudySessions } from "../src/sessions.ts";
 import { FeedbackFlow } from "../src/feedback.ts";
 import { configuredFeedbackSink } from "../src/feedback-cloud.ts";
 
@@ -6,7 +7,12 @@ try {
   if (!sink) throw new Error("Add SUPABASE_URL and SUPABASE_SECRET_KEY to your local .env");
   const count = await sink.check();
   console.log(`Connected to study_feedback${count === null ? "" : ` (${count} saved check-ins)`}.`);
-  const result = await new FeedbackFlow(undefined, sink).syncPending();
+  const sessions = new StudySessions();
+  await sessions.syncPending();
+  const result = await new FeedbackFlow(undefined, sink, {
+    afterSave: record => sessions.completeFeedback(record),
+    beforeUpload: record => sessions.ensureCloud(record),
+  }).syncPending();
   console.log(`Uploaded: ${result.synced}. Still pending locally: ${result.pending}.`);
   if (result.pending) process.exitCode = 1;
 } catch (error) {

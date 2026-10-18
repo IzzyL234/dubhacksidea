@@ -87,19 +87,20 @@ export class StudyLearner {
       Array.from({ length: dimension }, (_, j) => i === j ? 1 / lambda : 0));
   }
 
-  observe(observation: Observation): void {
+  observe(observation: Observation, sampleWeight = 1): void {
     validateObservation(observation);
+    bounded(sampleWeight, 0.000001, 1, "sampleWeight");
     if (this.ids.has(observation.id)) throw new Error(`Session already learned: ${observation.id}`);
     const x = features(observation);
-    // Exact recursive ridge update via Sherman–Morrison: A <- A + xxᵀ.
+    // Weighted ridge: A <- A + w xxᵀ, b <- b + w xy.
     const v = multiply(this.inverse, x);
-    const denominator = 1 + dot(x, v);
-    const next = this.inverse.map((row, i) => row.map((value, j) => value - v[i]! * v[j]! / denominator));
+    const denominator = 1 + sampleWeight * dot(x, v);
+    const next = this.inverse.map((row, i) => row.map((value, j) => value - sampleWeight * v[i]! * v[j]! / denominator));
     // Center ratings at 3, normalize to [-1, 1]. A cold model predicts neutral 3/5.
     const p = (observation.user_productivity_rating - 3) / 2;
     const m = (observation.user_mood_rating - 3) / 2;
-    this.productivity = this.productivity.map((value, i) => value + x[i]! * p);
-    this.mood = this.mood.map((value, i) => value + x[i]! * m);
+    this.productivity = this.productivity.map((value, i) => value + sampleWeight * x[i]! * p);
+    this.mood = this.mood.map((value, i) => value + sampleWeight * x[i]! * m);
     this.inverse = next;
     this.ids.add(observation.id);
   }

@@ -1,0 +1,186 @@
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { features, LOCATIONS, SPACES, train, type Context } from "./learning.ts";
+import { analyzePhoto, validateWorkspace, type Workspace } from "./vision.ts";
+import type { SessionFeedback } from "./feedback.ts";
+
+export type StudySession = {
+  id: string; user_id: string; started_at: string; ended_at: string | null;
+  duration_mins: number | null; location: Context["location"] | null; study_space: Context["study_space"] | null;
+  environment: Partial<Workspace>; environment_source: "perceptron" | "self_report" | "mixed" | null;
+  status: "active" | "awaiting_feedback" | "completed" | "canceled";
+  feedback_id: string | null; is_synthetic: false;
+};
+type Document = { sessions: StudySession[]; replies: { id: string; text: string }[] };
+export interface SessionSink { put(session: StudySession): Promise<void> }
+const hash = (s: string) => createHash("sha256").update(s).digest("hex");
+export function observationWeight(feedback: SessionFeedback): number {
+  return feedback.distraction_rating >= 4 && ["phone", "other"].includes(feedback.distraction_source ?? "") ? 0.25 : 1;
+}
+export function sessionContext(session: StudySession): Context | null {
+  const context = { timestamp: session.started_at, duration_mins: session.duration_mins,
+    location: session.location, study_space: session.study_space, environment: session.environment } as Context;
+  try { features(context); return context; } catch { return null; }
+}
+export class SupabaseSessions implements SessionSink {
+  constructor(private url: string, private key: string) {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || !parsed.hostname.endsWith(".supabase.co") || !key.startsWith("sb_secret_")) throw new Error("Invalid Supabase settings");
+    this.url = parsed.origin;
+  }
+  async put(session: StudySession) {
+    const result = await fetch(`${this.url}/rest/v1/study_sessions?on_conflict=id`, {
+      method: "POST", headers: { apikey: this.key, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(session), redirect: "error", signal: AbortSignal.timeout(10000),
+    });
+    if (!result.ok) throw new Error(`Session upload failed (HTTP ${result.status}); run supabase/004_session_lifecycle.sql`);
+  }
+}
+export function configuredSessions(): SessionSink | null {
+  return process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY
+    ? new SupabaseSessions(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY) : null;
+}
+export class StudySessions {
+  private locks = new Map<string, Promise<unknown>>();
+  constructor(private directory = fileURLToPath(new URL("../data/sessions/", import.meta.url)),
+    private sink: SessionSink | null = configuredSessions(),
+    private feedbackDirectory = fileURLToPath(new URL("../data/feedback/records/", import.meta.url)),
+    private seedFile = fileURLToPath(new URL("../data/seed_sessions.json", import.meta.url)),
+    private vision = analyzePhoto) {}
+  private async serialized<T>(key: string, action: () => Promise<T>): Promise<T> {
+    const before = this.locks.get(key) ?? Promise.resolve();
+    const operation = before.catch(() => {}).then(action);
+    this.locks.set(key, operation);
+    try { return await operation; } finally { if (this.locks.get(key) === operation) this.locks.delete(key); }
+  }
+  private async read(key: string): Promise<Document> {
+    try { return JSON.parse(await readFile(join(this.directory, `${key}.json`), "utf8")); }
+    catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return {sessions:[],replies:[]}; throw e; }
+  }
+  private async save(key: string, document: Document) {
+    await mkdir(this.directory,{recursive:true});
+    const path = join(this.directory,`${key}.json`), temp = `${path}.${randomUUID()}.tmp`;
+    await writeFile(temp,JSON.stringify(document),{mode:0o600}); await rename(temp,path);
+  }
+  async syncPending(): Promise<void> {
+    if (!this.sink) return;
+    let names: string[];
+    try { names = await readdir(this.directory); } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return; throw e; }
+    for (const name of names.filter(n=>/^[a-f0-9]{64}\.json$/.test(n))) {
+      const key=name.slice(0,-5);
+      await this.serialized(key, async()=> { for (const session of (await this.read(key)).sessions) await this.sink!.put(session); });
+    }
+  }
+  // Capture the exact session at check-in start, before any later session can be created.
+  async beginFeedback(key: string): Promise<string | null> {
+    return this.serialized(key,async()=>{
+      const doc=await this.read(key);
+      const session=doc.sessions.find(s=>s.status==="active" || s.status==="awaiting_feedback");
+      if (!session) return null;
+      if (session.status==="active") { session.status="awaiting_feedback"; session.ended_at=new Date().toISOString(); }
+      await this.save(key,doc); return session.id;
+    });
+  }
+  async completeFeedback(record: SessionFeedback): Promise<void> {
+    if (!record.session_id) return;
+    await this.serialized(record.conversation_key,async()=>{
+      const doc=await this.read(record.conversation_key);
+      const session=doc.sessions.find(s=>s.id===record.session_id);
+      if (!session) throw new Error("Linked session unavailable");
+      if (session.feedback_id && session.feedback_id!==record.id) throw new Error("Session already rated");
+      session.feedback_id=record.id; session.status="completed";
+      await this.save(record.conversation_key,doc);
+    });
+  }
+  async ensureCloud(record: SessionFeedback): Promise<void> {
+    if (!record.session_id) return;
+    if (!this.sink) throw new Error("Session cloud not configured");
+    await this.serialized(record.conversation_key,async()=>{
+      const session=(await this.read(record.conversation_key)).sessions.find(s=>s.id===record.session_id);
+      if (!session) throw new Error("Linked session unavailable");
+      await this.sink!.put(session); // parent exists before inserting feedback foreign key
+    });
+  }
+  async handle(conversation: string, text: string, messageId: string): Promise<string | null> {
+    const key=hash(conversation);
+    return this.serialized(key,async()=>{
+      const doc=await this.read(key);
+      const old=doc.replies.find(r=>r.id===messageId); if(old)return old.text;
+      const command=text.trim().toLowerCase();
+      const active=doc.sessions.find(s=>s.status==="active");
+      const waiting=doc.sessions.find(s=>s.status==="awaiting_feedback");
+      let reply: string | null=null;
+      if (/^start studying[.!]?$/.test(command)) {
+        if (active) reply="You already have a study session. Text study status or done.";
+        else if(waiting) reply="Finish your last check-in first: text rate session. Or text discard session to abandon it.";
+        else {
+          doc.sessions.push({id:randomUUID(),user_id:key,started_at:new Date().toISOString(),ended_at:null,
+            duration_mins:null,location:null,study_space:null,environment:{},environment_source:null,status:"active",feedback_id:null,is_synthetic:false});
+          reply="Started a study session. Where, what seat, and how many planned minutes? For example: library desk 45. Places: home, dorm_room, library, classroom, cafe. Seats: chair, desk, shared_table, bed, beanbag.";
+        }
+      } else if(command==="discard session") {
+        const session=active??waiting;
+        if(session){session.status="canceled";session.ended_at??=new Date().toISOString();}
+        reply=session?"Session discarded. It won't train your model.":"No unfinished study session.";
+      } else if(command==="study status") {
+        const session=active??waiting;
+        reply=session?`Session ${session.status.replaceAll("_"," ")}: ${session.location??"place not set"}, ${session.study_space??"seat not set"}, ${session.duration_mins??"?"} planned minutes. ${sessionContext(session)?"Context ready for learning.":"Context incomplete; send your place/seat/minutes and a photo or workspace details."}`:"No unfinished study session. Text start studying.";
+      } else if(command==="study score") {
+        if(!active) reply="Start a study session first.";
+        else if(!sessionContext(active)) reply="I need complete workspace context first. Send a photo or text workspace bright 3 7 (lighting, clutter 1–10, comfort 1–10).";
+        else reply=await this.score(key,active,doc);
+      } else if(active) {
+        const parts=command.split(/\s+/);
+        if(parts.length===3 && LOCATIONS.includes(parts[0] as any) && SPACES.includes(parts[1] as any)) {
+          const duration=Number(parts[2]);
+          if(!Number.isInteger(duration)||duration<5||duration>240)reply="Use planned minutes from 5 to 240.";
+          else {active.location=parts[0] as Context["location"];active.study_space=parts[1] as Context["study_space"];active.duration_mins=duration;
+            reply="Context saved. Send a workspace photo for Perceptron analysis, or text workspace bright 3 7 using your own lighting, clutter, and comfort ratings. Text done when you finish.";}
+        } else if(command.startsWith("workspace ")) {
+          try {if(parts.length!==4)throw new Error();
+            const environment=validateWorkspace({lighting:parts[1],clutter_score:Number(parts[2]),ergonomics:Number(parts[3])});
+            active.environment=environment; active.environment_source="self_report";
+            reply="Workspace details saved from your self-report. Text study score for a prediction, or done when finished.";
+          } catch {reply="Use workspace bright 3 7: dim/bright, clutter 1–10, comfort 1–10.";}
+        } else if(/^comfort [1-9]$|^comfort 10$/.test(command)) {
+          active.environment.ergonomics=Number(parts[1]);
+          active.environment_source=active.environment_source==="perceptron"?"mixed":active.environment_source??"self_report";
+          reply="Comfort saved. Text study score or done.";
+        }
+      }
+      if(reply!==null){doc.replies=[...doc.replies,{id:messageId,text:reply}].slice(-40);await this.save(key,doc);}
+      return reply;
+    });
+  }
+  async photo(conversation: string, messageId: string, mime: string, read:()=>Promise<Uint8Array>): Promise<string> {
+    const key=hash(conversation);
+    return this.serialized(key,async()=>{
+      const doc=await this.read(key);const old=doc.replies.find(r=>r.id===messageId);if(old)return old.text;
+      const session=doc.sessions.find(s=>s.status==="active");
+      if(!session)return "Text start studying before sending a workspace photo.";
+      if(!["image/jpeg","image/png","image/webp"].includes(mime))return "Please send a JPEG, PNG, or WebP photo.";
+      const environment=await this.vision(await read(),mime);
+      session.environment=environment;session.environment_source="perceptron";
+      const reply=`Perceptron estimates: ${environment.lighting} lighting, clutter ${environment.clutter_score}/10.${environment.ergonomics===null?" I couldn't assess seating/posture. Reply comfort 7 with your comfort from 1–10.":` Visible ergonomics ${environment.ergonomics}/10.`} You can correct these with workspace bright 3 7. Text done when finished.`;
+      doc.replies=[...doc.replies,{id:messageId,text:reply}].slice(-40);await this.save(key,doc);return reply;
+    });
+  }
+  private async score(key: string, current: StudySession, doc: Document): Promise<string> {
+    const rows=JSON.parse(await readFile(this.seedFile,"utf8"));
+    const {learner}=train(rows);
+    let names:string[]=[];
+    try{names=await readdir(this.feedbackDirectory);}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
+    let personal=0;
+    for(const name of names.filter(n=>/^[a-f0-9-]{36}\.json$/i.test(n)).sort()) {
+      const feedback=JSON.parse(await readFile(join(this.feedbackDirectory,name),"utf8")) as SessionFeedback;
+      if(feedback.conversation_key!==key||!feedback.session_id)continue;
+      const session=doc.sessions.find(s=>s.id===feedback.session_id&&s.status==="completed"&&s.feedback_id===feedback.id);
+      const context=session&&sessionContext(session);if(!context)continue;
+      learner.observe({...context,id:feedback.id,user_productivity_rating:feedback.productivity_rating,user_mood_rating:feedback.mood_rating},observationWeight(feedback));personal++;
+    }
+    const prediction=learner.predict(sessionContext(current)!);
+    return `Estimated productivity ${prediction.predictedProductivity.toFixed(1)}/5, mood ${prediction.predictedMood.toFixed(1)}/5. Based on ${rows.length} synthetic starter examples + ${personal} of your linked check-ins. These are associations, not guarantees. Planned duration is used; actual elapsed time is stored separately.`;
+  }
+}

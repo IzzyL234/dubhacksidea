@@ -10,3 +10,5 @@ credentials.json
 .google-calendar-token.json
 
 data/feedback/
+
+data/sessions/

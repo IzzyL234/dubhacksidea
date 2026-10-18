@@ -6,13 +6,13 @@ import { configuredFeedbackSink, type FeedbackSink } from "./feedback-cloud.ts";
 
 type Source = "surroundings" | "phone" | "other";
 type Draft = { id: string; step: "productivity" | "mood" | "distraction" | "source";
-  productivity?: number; mood?: number; distraction?: number };
+  productivity?: number; mood?: number; distraction?: number; sessionId?: string | null };
 type State = { draft?: Draft; replies: { messageId: string; reply: string }[] };
 export type SessionFeedback = {
   id: string;
   conversation_key: string;
   reported_at: string;
-  session_id: null;
+  session_id: string | null;
   productivity_rating: number;
   mood_rating: number;
   distraction_rating: number;
@@ -20,7 +20,13 @@ export type SessionFeedback = {
   is_synthetic: false;
 };
 
-export const FEEDBACK_START = /^(?:rate(?: (?:my |study )?session)?|finished studying)[.!?]*$/i;
+export const FEEDBACK_START = /^(?:rate(?: (?:my |study )?session)?|finished studying|done)[.!?]*$/i;
+
+export type FeedbackHooks = {
+  begin?: (conversationKey: string) => Promise<string | null>;
+  afterSave?: (record: SessionFeedback) => Promise<void>;
+  beforeUpload?: (record: SessionFeedback) => Promise<void>;
+};
 
 async function atomicJson(path: string, value: unknown) {
   const temp = `${path}.${randomUUID()}.tmp`;
@@ -37,7 +43,7 @@ async function atomicJson(path: string, value: unknown) {
 export class FeedbackFlow {
   private uploading = new Map<string, Promise<boolean>>();
   constructor(private directory = fileURLToPath(new URL("../data/feedback/", import.meta.url)),
-    private sink: FeedbackSink | null = configuredFeedbackSink()) {}
+    private sink: FeedbackSink | null = configuredFeedbackSink(), private hooks: FeedbackHooks = {}) {}
 
   async syncPending(): Promise<{ synced: number; pending: number }> {
     if (!this.sink) return { synced: 0, pending: 0 };
@@ -68,6 +74,8 @@ export class FeedbackFlow {
     const operation = (async () => {
       try {
         if (await this.isSynced(record.id)) return true;
+        await this.hooks.afterSave?.(record);
+        await this.hooks.beforeUpload?.(record);
         await this.sink!.put(record);
         await mkdir(join(this.directory, "synced"), { recursive: true });
         await atomicJson(join(this.directory, "synced", `${record.id}.json`), { synced_at: new Date().toISOString() });
@@ -116,7 +124,9 @@ export class FeedbackFlow {
       delete state.draft;
       reply = "Check-in canceled. Nothing was saved as session feedback.";
     } else if (!state.draft) {
-      state.draft = { id: randomUUID(), step: "productivity" };
+      const sessionId = await this.hooks.begin?.(key) ?? null;
+      if (command === "done" && !sessionId) return "No unfinished study session. Text start studying first, or rate session for a standalone check-in.";
+      state.draft = { id: randomUUID(), step: "productivity", sessionId };
       reply = "Quick check-in for your last study session. How productive were you? Reply 1–5 (1 = not productive, 5 = very productive). You can text cancel anytime.";
     } else if (FEEDBACK_START.test(command)) {
       reply = this.prompt(state.draft.step);
@@ -170,9 +180,9 @@ export class FeedbackFlow {
   private async save(directory: string, key: string, draft: Draft, source: Source | null): Promise<"cloud" | "queued" | "local"> {
     if (draft.productivity === undefined || draft.mood === undefined || draft.distraction === undefined) throw new Error("Incomplete check-in");
     const record: SessionFeedback = { id: draft.id, conversation_key: key, reported_at: new Date().toISOString(),
-      session_id: null, productivity_rating: draft.productivity, mood_rating: draft.mood,
+      session_id: draft.sessionId ?? null, productivity_rating: draft.productivity, mood_rating: draft.mood,
       distraction_rating: draft.distraction, distraction_source: source, is_synthetic: false };
-    // No workspace or session timestamp is guessed. Link to a confirmed study session in a later integration.
+    // The session ID was captured at check-in start, not guessed from the latest session.
     const path = join(directory, `${draft.id}.json`);
     let durable = record;
     try { durable = JSON.parse(await readFile(path, "utf8")) as SessionFeedback; }
@@ -180,6 +190,7 @@ export class FeedbackFlow {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       await atomicJson(path, record);
     }
+    await this.hooks.afterSave?.(durable);
     if (!this.sink) return "local";
     return await this.upload(durable) ? "cloud" : "queued";
   }

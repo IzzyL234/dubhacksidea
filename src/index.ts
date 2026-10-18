@@ -1,4 +1,6 @@
 import { LocationTrial } from "./location.ts";
+import { StudySessions } from "./sessions.ts";
+import { inboundMessages } from "./inbound.ts";
 import { FeedbackFlow } from "./feedback.ts";
 import { getUpcomingCalendarReply, isUpcomingRequest } from "./calendar.ts";
 import { Spectrum } from "spectrum-ts";
@@ -18,13 +20,20 @@ const app = await Spectrum({
 
 // Keep each conversation separate. Restarting the bot resets this memory.
 const conversations = new Map<string, string>();
-const feedbackFlow = new FeedbackFlow();
+const studySessions = new StudySessions();
+const feedbackFlow = new FeedbackFlow(undefined, undefined, {
+  begin: key => studySessions.beginFeedback(key),
+  afterSave: record => studySessions.completeFeedback(record),
+  beforeUpload: record => studySessions.ensureCloud(record),
+});
 const locationTrial = new LocationTrial();
 let feedbackSyncRunning = false;
 async function retryFeedbackSync() {
   if (feedbackSyncRunning) return;
   feedbackSyncRunning = true;
   try {
+    try { await studySessions.syncPending(); }
+    catch { console.error("Session cloud sync deferred. Local sessions are kept; check the session migration."); }
     const result = await feedbackFlow.syncPending();
     if (result.synced) console.log(`Uploaded ${result.synced} pending feedback check-in(s).`);
   } catch {
@@ -39,6 +48,7 @@ You are a friendly personal study and scheduling assistant.
 Write short, natural replies suitable for text messages.
 Help the user think through study plans and commitments.
 Ask one clarifying question at a time when needed. To record a study check-in, tell the user to text "rate session". A separate handler collects productivity, mood, and distraction ratings. Never invent ratings or claim you recorded them yourself.
+To track a linked study session, tell the user to text "start studying", then send place/seat/planned minutes such as "library desk 45". They can send a workspace photo, use "study score" for an estimate, and text "done" for linked ratings. These commands are handled separately; never claim you ran them yourself or invent workspace measurements.
 The bot can read the next five events from Hackathon Demo when the user texts "What's coming up?" or "calendar". For other calendar questions, ask them to use that command. You cannot create or change events yet.
 Never invent calendar events, claim you performed a calendar lookup yourself, or claim you booked or saved anything. You cannot access live phone location. For a shared-location trial, tell the user to text location. Never infer their current location from conversation or claim GPS access.
 `;
@@ -52,8 +62,28 @@ type GrokResponse = {
   }>;
 };
 
-for await (const [space, message] of app.messages) {
+for await (const [space, envelope] of app.messages) {
+  for (const message of inboundMessages(envelope)) {
   if (message.direction === "outbound") continue;
+  if (message.content.type === "attachment") {
+    try {
+      const attachment = message.content;
+      if (attachment.mimeType.startsWith("image/")) {
+        if (attachment.size !== undefined && attachment.size > 8_000_000) {
+          await space.send("Please send a workspace photo under 8 MB.");
+          continue;
+        }
+        await space.responding(async () => {
+          await space.send(await studySessions.photo(space.id, message.id, attachment.mimeType, () => attachment.read()));
+        });
+      }
+    } catch {
+      console.error("Workspace photo analysis failed; no image or credentials logged.");
+      try { await space.send("I couldn't analyze that photo. Check PERCEPTRON_API_KEY, or text workspace bright 3 7 for self-reported lighting, clutter, and comfort. No photo features were invented."); }
+      catch { console.error("Could not send photo error reply."); }
+    }
+    continue;
+  }
   const locationInput = message.content.type === "text" ? message.content.text
     : message.content.type === "richlink" ? message.content.url : null;
   if (locationInput !== null) {
@@ -70,6 +100,13 @@ for await (const [space, message] of app.messages) {
   if (!incoming) continue;
 
   try {
+    if (incoming.toLowerCase() === "discard session") await feedbackFlow.handle(space.id, "reset", `${message.id}:reset`);
+    const sessionReply = await studySessions.handle(space.id, incoming, message.id);
+    if (sessionReply !== null) {
+      await space.send(sessionReply);
+      void retryFeedbackSync();
+      continue;
+    }
     const feedbackReply = await feedbackFlow.handle(space.id, incoming, message.id);
     if (feedbackReply !== null) {
       await space.send(feedbackReply);
@@ -156,4 +193,5 @@ for await (const [space, message] of app.messages) {
       console.error("Could not send the error message.");
     }
   }
+}
 }
