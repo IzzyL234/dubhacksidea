@@ -28,7 +28,7 @@ export class ScheduleReviewService{
    const id=command.split(' ').at(-1)!,p=s.reviews.find(p=>p.id===id);if(!p)return 'That review does not belong to this chat. Text review schedule to check your calendar.';
    if(p.status==='applied')return 'That approved change was already applied. No second change was made.';
    if(p.status!=='pending')return `That review is ${p.status}. Text review schedule for a fresh check.`;
-   if(command.startsWith('skip')){p.status='skipped';await this.save(s);await this.publish(s);return 'Skipped that proposal. Your calendar is unchanged.';}
+   if(command.startsWith('skip')){p.status='skipped';await this.save(s);await this.publish(s).catch(()=>{});return 'Skipped that proposal. Your calendar is unchanged.';}
    if(!p.after)return 'This is a conflict alert, not an approved move. Resolve it in Google Calendar; I will not move meetings or classes for you.';
    try{p.status=await applyScheduleReview(this.deps.gateway,p,this.now());}catch(e){if((e as Error).message==='CALENDAR_WRITE_AUTH_REQUIRED'||[401,403].includes((e as any)?.response?.status))return 'Calendar editing needs authorization. Run bun calendar-write-auth.mjs, then resend this approval. Nothing was confirmed changed.';return 'I could not confirm that change. Resend the same approval to check safely; I will not create a duplicate event.';}
    await this.save(s);await this.publish(s).catch(()=>{});
@@ -44,8 +44,9 @@ export class ScheduleReviewService{
    s.reviews.push(p);
   }
   s.reviews=s.reviews.slice(-30);s.reviewLinks??={};for(const p of s.reviews)if(p.status==='pending'&&!s.reviewLinks[p.id])s.reviewLinks[p.id]=randomBytes(32).toString('base64url');s.reviewLinks=Object.fromEntries(Object.entries(s.reviewLinks).filter(([id])=>s.reviews.some(p=>p.id===id)));await this.save(s);
-  // Persist privately before sending a link, so the review page can load it.
-  await this.publish(s);
+  // The protected worker reads the saved local state. A manual request can
+  // return its link during a cloud outage; automatic notifications still wait.
+  try{await this.publish(s);}catch(error){if(notify)throw error;}
   if(!notify||this.now()-(s.lastNotification??0)<6*3600000)return;
   const p=s.reviews.find(p=>p.status==='pending'&&Date.parse(p.expiresAt)>this.now()&&!s.notified.includes(p.id));if(!p)return;
   // At-most-once automatic sending: a delivery failure can be recovered manually.
