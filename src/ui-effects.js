@@ -1,4 +1,6 @@
 import {animate, hover, inView} from 'motion';
+import {learningWalkthrough} from './learning-walkthrough.js';
+import {demoVideos} from './demo-videos.js';
 
 const media = matchMedia('(prefers-reduced-motion: reduce)');
 const active = new Map();
@@ -36,3 +38,5 @@ function stopForReducedMotion() {
 }
 media.addEventListener('change', stopForReducedMotion);
 new MutationObserver(stopForReducedMotion).observe(document.body, {attributes: true, attributeFilter: ['class']});
+learningWalkthrough({run});
+demoVideos();
