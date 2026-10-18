@@ -28,6 +28,7 @@ import {
   isProposalRejection,
 } from "./staged-proposals.ts";
 import { StudyReminders } from "./proactive.ts";
+import { SuggestionReviewApi, type ReviewResult } from "./suggestion-review-api.ts";
 import { Spectrum } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
 
@@ -85,6 +86,7 @@ const messaging = imessage(app);
 const calendarCommands = new CalendarCommands(demoCalendar,undefined,Date.now,interpretCalendar);
 const stagedProposals = new StagedProposalEngine(demoCalendar);
 const smartPrompts = new SmartPrompts({eventDriven:true,sessionState:async c=>({...await studySessions.chatContext(c),feedbackPending:await feedbackFlow.hasDraft(c)}),coordinatorPlaces:true,learn:async(c,p,m)=>({...await studySessions.proactiveOptions(c,p,m),sessionContext:await sessionContext.summary(c)}),events:configuredEventSink(),read:readPhotonLocation,decide:decidePrompt,lookup:lookupCampusBuildings,localBuildings:true});
+let suggestionReviewApi:SuggestionReviewApi|undefined;
 const reminders = new StudyReminders({
   refresh:c=>smartPrompts.refreshPresence(c),
   promptBudget:6,
@@ -93,6 +95,13 @@ const reminders = new StudyReminders({
   confirm:(c,b)=>smartPrompts.confirm(c,b),
   audit:(c,r)=>smartPrompts.audit(c,r),
   outcome:(c,k)=>smartPrompts.outcome(c,k),
+  createReview:(conversation,block,plannedMinutes,expiresAt,reason)=>{
+    const start=block.kind==="open"?Date.now():block.start;
+    return suggestionReviewApi?.createSuggestion(conversation,{
+      title:"Study session",start,end:block.kind==="open"?start+plannedMinutes*60_000:block.end,
+      availableUntil:block.end,reason,
+    },expiresAt)??Promise.resolve(null);
+  },
   events: now => getOpenStudyWindows(now),
   send: async (conversation, text) => { const space = await messaging.space.get(conversation); await space.send(text); },
   busy: async conversation => await studySessions.hasUnfinished(conversation) || await feedbackFlow.hasDraft(conversation),
@@ -100,6 +109,22 @@ const reminders = new StudyReminders({
   active: (conversation, id) => studySessions.isActive(conversation, id),
   checkIn: conversation => feedbackFlow.hasDraft(conversation),
 });
+suggestionReviewApi=new SuggestionReviewApi(async(conversation,id,decision):Promise<ReviewResult>=>{
+  const reply=await reminders.handle(conversation,decision==="accept"?"yes":"skip",`web-review:${id}`,id);
+  if(decision==="decline"){
+    const declined=reply?.startsWith("Skipped this study block")===true;
+    return {id,decision,status:declined?"declined":"rejected",calendar_status:"unchanged",message:reply??"The suggestion could not be declined."};
+  }
+  const accepted=reply?.startsWith("Started your study session")===true;
+  const booked=accepted&&reply.includes("Added it to Hackathon Demo.");
+  return {id,decision,status:booked?"confirmed":accepted?"accepted_booking_pending":"rejected",
+    calendar_status:booked?"confirmed":accepted?"not_confirmed":"unchanged",
+    message:reply??"The suggestion could not be accepted."};
+});
+if(process.env.FRAMER_REVIEW_URL){
+  await suggestionReviewApi.listen();
+  console.log("Calendar review API listening",JSON.stringify(suggestionReviewApi.address()));
+}
 let reminderTickRunning = false;
 async function pollStudyReminders() {
   if (reminderTickRunning) return;

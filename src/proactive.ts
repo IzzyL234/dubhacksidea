@@ -7,7 +7,7 @@ import type { StudyBlock } from "./study-events.ts";
 type Delivery = { block: StudyBlock; startAttempted?: boolean; sessionId?: string; endAttempted?: boolean };
 type State = {
   conversation?: string; enabled: boolean; quietEnabled?:boolean; quietStart: number; quietEnd: number;
-  events: Record<string,Delivery>; pending?: {key:string;expires:number;kind?:"place"|"checkin";plannedMinutes?:number}; lastPrompt?:number; snoozeUntil?:number;
+  events: Record<string,Delivery>; pending?: {key:string;expires:number;kind?:"place"|"checkin";plannedMinutes?:number;reviewId?:string}; lastPrompt?:number; snoozeUntil?:number;
   replies:{id:string;conversation:string;reply:string}[];
 };
 export type ReminderDependencies = {
@@ -23,6 +23,7 @@ export type ReminderDependencies = {
   observe?:(conversation:string)=>Promise<{allow:boolean;message?:string;kind?:"place"|"checkin";plannedMinutes?:number}>;
   evaluate?:(conversation:string,block:StudyBlock)=>Promise<{allow:boolean;message?:string;kind?:"place"|"checkin";plannedMinutes?:number}>;
   resolvePlace?:(conversation:string,accept:boolean)=>Promise<string>;
+  createReview?:(conversation:string,block:StudyBlock,plannedMinutes:number,expiresAt:number,reason:string)=>Promise<{id:string;url:string}|null>;
   confirm?:(conversation:string,block:StudyBlock)=>Promise<boolean>;
   audit?:(conversation:string,reason:string)=>Promise<void>;
   outcome?:(conversation:string,kind:"accepted"|"skipped")=>Promise<void>;
@@ -51,12 +52,13 @@ export class StudyReminders {
   async enabledFor(conversation:string):Promise<boolean>{return this.serialized(async()=>{const s=await this.read();return s.enabled&&s.conversation===conversation;});}
   private async audit(conversation:string,reason:string){try{await this.deps.audit?.(conversation,reason);}catch{}}
   private async outcome(conversation:string,kind:"accepted"|"skipped"){try{await this.deps.outcome?.(conversation,kind);}catch{}}
-  async handle(conversation:string,text:string,messageId:string):Promise<string|null>{
+  async handle(conversation:string,text:string,messageId:string,expectedReviewId?:string):Promise<string|null>{
     return this.serialized(async()=>{
       const command=text.trim().toLowerCase().replace(/[.!?]+$/,"");
       if(!/^(reminders (?:on|off|status)|quiet hours(?: .*)?|yes|skip)$/.test(command))return null;
       const state=await this.read();
       const previous=state.replies.find(r=>r.id===messageId&&r.conversation===conversation);if(previous)return previous.reply;
+      if(expectedReviewId&&state.pending?.reviewId!==expectedReviewId)return "This suggestion is no longer pending.";
       const owner=state.conversation===conversation;
       let reply:string|null=null;
       if(command==="reminders on"){
@@ -178,12 +180,20 @@ export class StudyReminders {
           await this.audit(state.conversation,"context_changed_before_send");await this.save(state);return;
         }
       }
+      const pendingExpires=Math.min(block.end,now+10*60_000);
+      const plannedMinutes=gate.plannedMinutes??Math.min(45,Math.floor((block.end-now)/60_000));
+      let review:{id:string;url:string}|null=null;
+      if(this.deps.createReview){
+        try{review=await this.deps.createReview(state.conversation,block,plannedMinutes,pendingExpires,gate.message??"A study session is available in your calendar.");}
+        catch{await this.audit(state.conversation,"review_link_unavailable");}
+      }
       state.events[gate.kind==="place"?`place:${now}:${block.key}`:block.key]={block:{...block,start:now},startAttempted:true};
-      state.pending={key:block.key,expires:Math.min(block.end,now+10*60_000),...(gate.plannedMinutes!==undefined?{plannedMinutes:gate.plannedMinutes}:{}),...(gate.kind?{kind:gate.kind}:{})};state.lastPrompt=now;
+      state.pending={key:block.key,expires:pendingExpires,...(review?{reviewId:review.id}:{}),...(gate.plannedMinutes!==undefined?{plannedMinutes:gate.plannedMinutes}:{}),...(gate.kind?{kind:gate.kind}:{})};state.lastPrompt=now;
       await this.save(state);
-      await this.deps.send(state.conversation,gate.message??(block.kind==="open"
+      const invitation=gate.message??(block.kind==="open"
         ?`Your demo calendar has ${Math.floor((block.end-now)/60_000)} free minutes now. Want to start a ${Math.min(45,Math.floor((block.end-now)/60_000))}-minute study session and add it to Hackathon Demo? Reply yes or skip. I'll only follow up if you start.`
-        :`Ready for your calendar block “${block.title}”? Reply yes to start a study session and add it to Hackathon Demo, or skip. I'll only follow up if you start.`));
+        :`Ready for your calendar block “${block.title}”? Reply yes to start a study session and add it to Hackathon Demo, or skip. I'll only follow up if you start.`);
+      await this.deps.send(state.conversation,review?`${invitation}\nReview visually: ${review.url}`:invitation);
     });
   }
 }
