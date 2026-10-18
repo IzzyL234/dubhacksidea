@@ -431,9 +431,21 @@ export class StudySessions {
     });
   }
   private async photoPrediction(key:string,current:StudySession,doc:Document):Promise<string>{
-    if(sessionContext(current))return "📈 "+await this.score(key,current,doc);
     const {learner,contexts,personal,cloudUnavailable}=await this.buildPersonalLearner(key,doc,false,false);
-    if(!contexts.length)return "📈 Personal prediction: I don’t have enough completed sessions with workspace details yet. The photo numbers above are visual estimates, not learned productivity ratings."+(cloudUnavailable?" Cloud history is unavailable right now.":"");
+    if(!contexts.length){
+      let starter:ReturnType<typeof train>|undefined;
+      try{starter=train(JSON.parse(await readFile(this.seedFile,"utf8")));}catch{/* Missing demo data never becomes invented personal history. */}
+      if(starter?.observations.length){
+        let profiles=starter.observations.filter(c=>(!current.location||c.location===current.location)&&(!current.study_space||c.study_space===current.study_space));
+        if(!profiles.length)profiles=starter.observations;
+        const predictions=profiles.map(c=>starter!.learner.predict({...c,location:current.location??c.location,study_space:current.study_space??c.study_space,duration_mins:current.duration_mins??c.duration_mins,environment:{lighting:current.environment.lighting!,clutter_score:current.environment.clutter_score!,ergonomics:current.environment.ergonomics??c.environment.ergonomics}}));
+        const avg=(key:"predictedProductivity"|"predictedMood")=>predictions.reduce((sum,p)=>sum+p[key],0)/predictions.length;
+        const productivity=avg("predictedProductivity"),mood=avg("predictedMood");const index=Math.round(((.7*productivity+.3*mood)-1)/4*100);
+        return `🧪 Starter-model estimate — ${starter.observations.length} synthetic demo sessions, not your personal history:\n🎯 Model score: ${index}/100\n📚 Predicted productivity: ${productivity.toFixed(1)}/5\n🙂 Predicted mood: ${mood.toFixed(1)}/5\nThis uses your photo’s visible features, averaging starter-profile assumptions for missing context. Model score rescales 70% productivity + 30% mood to 0–100. It is not measured productivity or personal learning.`+(cloudUnavailable?" Personal cloud history is unavailable right now.":"");
+      }
+      return "📈 Personal prediction: I don’t have enough completed sessions with workspace details yet. The photo numbers above are visual estimates, not learned productivity ratings."+(cloudUnavailable?" Cloud history is unavailable right now.":"");
+    }
+    if(sessionContext(current))return "📈 "+await this.score(key,current,doc);
     const profiles=contexts.slice(-5);const predictions=profiles.map(c=>learner.predict({...c,timestamp:new Date(this.now()).toISOString(),location:current.location??c.location,study_space:current.study_space??c.study_space,duration_mins:current.duration_mins??c.duration_mins,environment:{clutter_score:current.environment.clutter_score!,lighting:current.environment.lighting!,ergonomics:current.environment.ergonomics??c.environment.ergonomics}}));
     const range=(key:"predictedProductivity"|"predictedMood")=>{const values=predictions.map(p=>p[key]);const lo=Math.min(...values).toFixed(1),hi=Math.max(...values).toFixed(1);return lo===hi?lo:lo+"–"+hi;};
     return `📈 Based on ${personal} of your completed sessions:\n🎯 Estimated productivity: ${range("predictedProductivity")}/5\n🙂 Estimated mood: ${range("predictedMood")}/5\nThese compare your photo with previous setups, using historical values for missing place, seating, comfort or duration. They’re uncertain estimates, not a measurement of today’s productivity.`+(cloudUnavailable?" Cloud history unavailable; local feedback only.":"");
