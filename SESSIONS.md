@@ -27,7 +27,7 @@ Productivity and mood remain separate ridge reward predictors used by the existi
 
 Duration is planned duration, matching the current predictor's input; started_at/ended_at also record real timing. No learned time-of-day effect is claimed. The image adapter does not guess exact location, mood, productivity, or actual distraction, and never substitutes mock observations for an unavailable API.
 
-OwnTracks arrival-to-session automation, calendar triggers, and proactive notifications are separate unfinished integrations. This flow works manually while the phone is being updated.
+OwnTracks arrival-to-session automation remains a separate unfinished integration. Calendar-based proactive prompts are now documented in REMINDERS.md; the manual session flow also works while the phone is being updated.
 
 ## Verification
 

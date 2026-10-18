@@ -2,7 +2,8 @@ import { LocationTrial } from "./location.ts";
 import { StudySessions } from "./sessions.ts";
 import { inboundMessages } from "./inbound.ts";
 import { FeedbackFlow } from "./feedback.ts";
-import { getUpcomingCalendarReply, isUpcomingRequest } from "./calendar.ts";
+import { getUpcomingCalendarReply, isUpcomingRequest, getCalendarStudyBlocks } from "./calendar.ts";
+import { StudyReminders } from "./proactive.ts";
 import { Spectrum } from "spectrum-ts";
 import { imessage } from "@spectrum-ts/imessage";
 
@@ -27,6 +28,25 @@ const feedbackFlow = new FeedbackFlow(undefined, undefined, {
   beforeUpload: record => studySessions.ensureCloud(record),
 });
 const locationTrial = new LocationTrial();
+const messaging = imessage(app);
+const reminders = new StudyReminders({
+  events: now => getCalendarStudyBlocks(now),
+  send: async (conversation, text) => { const space = await messaging.space.get(conversation); await space.send(text); },
+  busy: async conversation => await studySessions.hasUnfinished(conversation) || await feedbackFlow.hasDraft(conversation),
+  start: (conversation, block) => studySessions.startCalendar(conversation, block.key, (block.end-block.start)/60_000),
+  active: (conversation, id) => studySessions.isActive(conversation, id),
+  checkIn: conversation => feedbackFlow.hasDraft(conversation),
+});
+let reminderTickRunning = false;
+async function pollStudyReminders() {
+  if (reminderTickRunning) return;
+  reminderTickRunning = true;
+  try { await reminders.tick(); }
+  catch { console.error("Study reminder check failed. No event details or credentials logged."); }
+  finally { reminderTickRunning = false; }
+}
+void pollStudyReminders();
+setInterval(() => void pollStudyReminders(), 60_000).unref();
 let feedbackSyncRunning = false;
 async function retryFeedbackSync() {
   if (feedbackSyncRunning) return;
@@ -49,6 +69,7 @@ Write short, natural replies suitable for text messages.
 Help the user think through study plans and commitments.
 Ask one clarifying question at a time when needed. To record a study check-in, tell the user to text "rate session". A separate handler collects productivity, mood, and distraction ratings. Never invent ratings or claim you recorded them yourself.
 To track a linked study session, tell the user to text "start studying", then send place/seat/planned minutes such as "library desk 45". They can send a workspace photo, use "study score" for an estimate, and text "done" for linked ratings. These commands are handled separately; never claim you ran them yourself or invent workspace measurements.
+Calendar reminders are controlled by "reminders on", "reminders off", "reminders status", and "quiet hours 22 8". Only timed study/studying blocks are eligible. Never claim to enable reminders yourself. They work while the bot runs and use Pacific quiet hours.
 The bot can read the next five events from Hackathon Demo when the user texts "What's coming up?" or "calendar". For other calendar questions, ask them to use that command. You cannot create or change events yet.
 Never invent calendar events, claim you performed a calendar lookup yourself, or claim you booked or saved anything. You cannot access live phone location. For a shared-location trial, tell the user to text location. Never infer their current location from conversation or claim GPS access.
 `;
@@ -100,6 +121,13 @@ for await (const [space, envelope] of app.messages) {
   if (!incoming) continue;
 
   try {
+    const reminderReply = await reminders.handle(space.id, incoming, message.id);
+    if (reminderReply !== null) {
+      await space.send(reminderReply);
+      void pollStudyReminders();
+      void retryFeedbackSync();
+      continue;
+    }
     if (incoming.toLowerCase() === "discard session") await feedbackFlow.handle(space.id, "reset", `${message.id}:reset`);
     const sessionReply = await studySessions.handle(space.id, incoming, message.id);
     if (sessionReply !== null) {

@@ -42,7 +42,7 @@ The learning demo uses 40 synthetic records, two ridge reward predictors, and Li
 
 Optional backend settings are `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (a key starting `sb_secret_`). Run `bun supabase-test.mjs` to test read access to `public.study_sessions`. The table setup is in `supabase/001_study_sessions.sql`.
 
-Run `supabase/002_study_feedback.sql` in Supabase SQL Editor, then `bun scripts/sync-feedback.ts` to check the connection and upload pending check-ins. The bot saves feedback locally first and retries Supabase uploads every minute. UUIDs prevent duplicate rows. Completed check-ins and unfinished conversations persist privately under `data/feedback/`. Standalone check-ins remain unlinked. New linked study sessions can personalize predictions after `supabase/004_session_lifecycle.sql` is applied. Calendar creation and proactive notifications are future steps.
+Run `supabase/002_study_feedback.sql` in Supabase SQL Editor, then `bun scripts/sync-feedback.ts` to check the connection and upload pending check-ins. The bot saves feedback locally first and retries Supabase uploads every minute. UUIDs prevent duplicate rows. Completed check-ins and unfinished conversations persist privately under `data/feedback/`. Standalone check-ins remain unlinked. New linked study sessions can personalize predictions after `supabase/004_session_lifecycle.sql` is applied. Calendar creation remains a future step. Calendar study reminders are available through `reminders on`; see `REMINDERS.md`.
 
 ## Private files
 
@@ -53,3 +53,7 @@ The root `generate_seed_sessions.py`, `seed_sessions.json`, and `analyze_workspa
 ## Linked study sessions
 
 Text `start studying`, supply place/seat/planned minutes (for example `library desk 45`), then send a photo or self-reported workspace details. `study score` gives an estimate; `done` collects linked ratings. Run `supabase/004_session_lifecycle.sql` first. Photos need `PERCEPTRON_API_KEY`; setup and limitations are in `SESSIONS.md`.
+
+## Study reminders
+
+Restart with `bun start`, then text `reminders on`. Timed study/studying calendar blocks can prompt you to begin and follow up after a confirmed session. Defaults: Pacific quiet hours 22:00–08:00. Text `reminders off` to stop. See `REMINDERS.md` for setup and operating limits.
