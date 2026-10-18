@@ -13,17 +13,19 @@ export type StudySession = {
   environment: Partial<Workspace>; environment_source: "perceptron" | "self_report" | "mixed" | null;
   status: "active" | "awaiting_feedback" | "completed" | "canceled";
   feedback_id: string | null; is_synthetic: false;
+  starting_energy?: number | null;
+  starting_noise?: "quiet" | "moderate" | "loud" | "unknown" | null;
+  starting_context_at?: string | null;
 };
 type Document = { sessions: StudySession[]; replies: { id: string; text: string }[] };
 export interface SessionSink { put(session: StudySession): Promise<void> }
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 export function observationWeight(feedback: SessionFeedback): number {
   if (feedback.distraction_rating < 4) return 1;
-  const attribution=(feedback as SessionFeedback & {distraction_attribution?:string|null}).distraction_attribution;
-  if (attribution === "interruption") return 0.25;
+  if (feedback.distraction_attribution === "interruption") return 0.25;
   // Unknown is kept unknown; no causal correction is inferred. Both setup and unsure
   // retain ordinary weight. Preserve the legacy rule only for older records.
-  if (attribution != null) return 1;
+  if (feedback.distraction_attribution != null) return 1;
   return feedback.distraction_rating >= 4 && ["phone", "other"].includes(feedback.distraction_source ?? "") ? 0.25 : 1;
 }
 export function sessionContext(session: StudySession): Context | null {
@@ -56,7 +58,8 @@ export class StudySessions {
     private feedbackDirectory = fileURLToPath(new URL("../data/feedback/records/", import.meta.url)),
     private seedFile = fileURLToPath(new URL("../data/seed_sessions.json", import.meta.url)),
     private vision = analyzePhoto,
-    private history:StudyHistorySource|null = sink instanceof SupabaseSessions?configuredLearningStore():null) {}
+    private history:StudyHistorySource|null = sink instanceof SupabaseSessions?configuredLearningStore():null,
+    private now:()=>number = Date.now) {}
   private async serialized<T>(key: string, action: () => Promise<T>): Promise<T> {
     const before = this.locks.get(key) ?? Promise.resolve();
     const operation = before.catch(() => {}).then(action);
@@ -88,10 +91,10 @@ export class StudySessions {
       const existing=doc.sessions.find(s=>s.id===id);
       if(existing)return existing.status==="active"?{id,reply:"This calendar session is already started. Text study status."}:null;
       if(doc.sessions.some(s=>s.status==="active"||s.status==="awaiting_feedback"))return null;
-      doc.sessions.push({id,user_id:key,started_at:new Date().toISOString(),ended_at:null,duration_mins:plannedMinutes,
-        location:null,study_space:null,environment:{},environment_source:null,status:"active",feedback_id:null,is_synthetic:false});
+      doc.sessions.push({id,user_id:key,started_at:new Date(this.now()).toISOString(),ended_at:null,duration_mins:plannedMinutes,
+        location:null,study_space:null,environment:{},environment_source:null,status:"active",feedback_id:null,is_synthetic:false,starting_energy:null,starting_noise:null,starting_context_at:null});
       await this.save(key,doc);
-      return {id,reply:`Started your calendar study session (${plannedMinutes} planned minutes). Reply with your place and seat, for example library desk, then send a workspace photo or text workspace bright 3 7. Text done when finished.`};
+      return {id,reply:`Started your calendar study session (${plannedMinutes} planned minutes). Reply with your place and seat, for example library desk, then send a workspace photo or text workspace bright 3 7. Optional within the first 5 minutes: starting context 3 quiet (energy 1-5; noise quiet/moderate/loud/unknown). Text done when finished.`};
     });
   }
   async syncPending(): Promise<void> {
@@ -109,7 +112,7 @@ export class StudySessions {
       const doc=await this.read(key);
       const session=doc.sessions.find(s=>s.status==="active" || s.status==="awaiting_feedback");
       if (!session) return null;
-      if (session.status==="active") { session.status="awaiting_feedback"; session.ended_at=new Date().toISOString(); }
+      if (session.status==="active") { session.status="awaiting_feedback"; session.ended_at=new Date(this.now()).toISOString(); }
       await this.save(key,doc); return session.id;
     });
   }
@@ -146,17 +149,29 @@ export class StudySessions {
         if (active) reply="You already have a study session. Text study status or done.";
         else if(waiting) reply="Finish your last check-in first: text rate session. Or text discard session to abandon it.";
         else {
-          doc.sessions.push({id:randomUUID(),user_id:key,started_at:new Date().toISOString(),ended_at:null,
-            duration_mins:null,location:null,study_space:null,environment:{},environment_source:null,status:"active",feedback_id:null,is_synthetic:false});
-          reply="Started a study session. Where, what seat, and how many planned minutes? For example: library desk 45. Places: home, dorm_room, library, classroom, cafe. Seats: chair, desk, shared_table, bed, beanbag.";
+          doc.sessions.push({id:randomUUID(),user_id:key,started_at:new Date(this.now()).toISOString(),ended_at:null,
+            duration_mins:null,location:null,study_space:null,environment:{},environment_source:null,status:"active",feedback_id:null,is_synthetic:false,starting_energy:null,starting_noise:null,starting_context_at:null});
+          reply="Started a study session. Where, what seat, and how many planned minutes? For example: library desk 45. Places: home, dorm_room, library, classroom, cafe. Seats: chair, desk, shared_table, bed, beanbag. Optional within the first 5 minutes: starting context 3 quiet (energy 1-5; noise quiet/moderate/loud/unknown).";
+        }
+      } else if(command.startsWith("starting context")) {
+        const match=command.match(/^starting context ([1-5]|unknown) (quiet|moderate|loud|unknown)$/);
+        const elapsed=active?this.now()-Date.parse(active.started_at):NaN;
+        if(!active)reply="Start a study session first.";
+        else if(!Number.isFinite(elapsed)||elapsed<0||elapsed>5*60_000)reply="Starting context can only be recorded in the first 5 minutes, before the session outcome is known.";
+        else if(!match)reply="Use starting context 3 quiet: energy 1-5 (1 = exhausted, 5 = energized) or unknown; noise quiet/moderate/loud/unknown. This is optional.";
+        else{
+          active.starting_energy=match[1]==="unknown"?null:Number(match[1]);
+          active.starting_noise=match[2] as StudySession["starting_noise"];
+          active.starting_context_at=new Date(this.now()).toISOString();
+          reply="Starting energy and noise saved. These are collected for future learning; they don't change today's model score yet. Text done when finished.";
         }
       } else if(command==="discard session") {
         const session=active??waiting;
-        if(session){session.status="canceled";session.ended_at??=new Date().toISOString();}
+        if(session){session.status="canceled";session.ended_at??=new Date(this.now()).toISOString();}
         reply=session?"Session discarded. It won't train your model.":"No unfinished study session.";
       } else if(command==="study status") {
         const session=active??waiting;
-        reply=session?`Session ${session.status.replaceAll("_"," ")}: ${session.location??"place not set"}, ${session.study_space??"seat not set"}, ${session.duration_mins??"?"} planned minutes. ${sessionContext(session)?"Context ready for learning.":"Context incomplete; send your place/seat/minutes and a photo or workspace details."}`:"No unfinished study session. Text start studying.";
+        reply=session?`Session ${session.status.replaceAll("_"," ")}: ${session.location??"place not set"}, ${session.study_space??"seat not set"}, ${session.duration_mins??"?"} planned minutes. Starting energy ${session.starting_energy??"unknown"}/5; noise ${session.starting_noise??"unknown"}. ${sessionContext(session)?"Context ready for learning.":"Context incomplete; send your place/seat/minutes and a photo or workspace details."}`:"No unfinished study session. Text start studying.";
       } else if(command==="study score") {
         if(!active) reply="Start a study session first.";
         else if(!sessionContext(active)) reply="I need complete workspace context first. Send a photo or text workspace bright 3 7 (lighting, clutter 1–10, comfort 1–10).";
@@ -210,7 +225,6 @@ export class StudySessions {
     }
     let personal=0;
     for(const {session_record:session,feedback_record:feedback} of [...pairs.values()].sort((a,b)=>a.feedback_record.id.localeCompare(b.feedback_record.id))){
-      if(!session||!feedback)continue;
       if(feedback.conversation_key!==key||session.user_id!==key||session.status!=="completed"||session.feedback_id!==feedback.id||session.id!==feedback.session_id||session.is_synthetic!==false||feedback.is_synthetic!==false)continue;
       const context=sessionContext(session);if(!context)continue;
       try{learner.observe({...context,id:feedback.id,user_productivity_rating:feedback.productivity_rating,user_mood_rating:feedback.mood_rating},observationWeight(feedback));personal++;}catch{/* Invalid observations cannot train the model. */}

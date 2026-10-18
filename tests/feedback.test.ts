@@ -37,7 +37,7 @@ test("invalid ratings and source answers do not advance the check-in", async () 
   for (const input of ["0", "6", "2.5", "hello"]) expect(await flow.handle("a", input, input)).toContain("whole number");
   expect(await flow.handle("a", "5", "p")).toContain("mood");
   await flow.handle("a", "4", "m");await flow.handle("a", "4", "d");
-  expect(await flow.handle("a", "not sure", "invalid-source")).toContain("skip");expect(await records(directory)).toHaveLength(0);
+  expect(await flow.handle("a", "invalid", "invalid-source")).toContain("skip");expect(await records(directory)).toHaveLength(0);
 });
 test("check-in survives process restart and stays isolated per conversation", async () => {
   const { directory, flow } = await setup();await flow.handle("a", "rate", "start-a");await flow.handle("a", "5", "p");
@@ -57,3 +57,4 @@ test("cancel and reset discard incomplete feedback; ordinary messages pass to th
   await flow.handle("a", "rate", "s2");expect(await flow.handle("a", "reset", "r")).toBeNull();
   expect(await flow.handle("a", "4", "p")).toBeNull();expect(await records(directory)).toHaveLength(0);
 });
+

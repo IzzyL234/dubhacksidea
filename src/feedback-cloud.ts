@@ -21,6 +21,7 @@ export class SupabaseFeedback implements FeedbackSink {
       reported_at: record.reported_at, session_id: record.session_id,
       productivity_rating: record.productivity_rating, mood_rating: record.mood_rating,
       distraction_rating: record.distraction_rating, distraction_source: record.distraction_source,
+      ...(record.distraction_attribution === undefined ? {} : {distraction_attribution: record.distraction_attribution}),
       is_synthetic: record.is_synthetic };
     const response = await this.request(`${this.base}/rest/v1/study_feedback?on_conflict=id`, {
       method: "POST", headers: { apikey: this.secret, "Content-Type": "application/json",

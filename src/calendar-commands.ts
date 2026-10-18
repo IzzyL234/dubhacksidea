@@ -6,10 +6,21 @@ import type { CalendarGateway,DemoEvent,EventInput } from "./calendar-types.ts";
 import { formatTime,parseCalendarTime,TIMEZONE } from "./time.ts";
 type State={listedAt?:number;events:DemoEvent[];replies:{id:string;reply:string}[]};
 export class CalendarCommands {
+  private locks=new Map<string,Promise<unknown>>();
   constructor(private gateway:CalendarGateway,private directory=fileURLToPath(new URL("../data/calendar-commands/",import.meta.url)),private now=Date.now){}
   async handle(conversation:string,text:string,messageId:string):Promise<string|null>{
     const command=text.trim();
     if(!/^(calendar events|calendar help|add event(?:\s|$)|move event(?:\s|$)|rename event(?:\s|$))/i.test(command))return null;
+    // Serialize each chat's read/write cycle, including replay checks and external writes.
+    // Separate chats remain independent, and rejected requests do not poison the queue.
+    const previous=this.locks.get(conversation)??Promise.resolve();
+    const next=previous.catch(()=>{}).then(()=>this.handleSerialized(conversation,text,messageId));
+    this.locks.set(conversation,next);
+    try{return await next;}
+    finally{if(this.locks.get(conversation)===next)this.locks.delete(conversation);}
+  }
+  private async handleSerialized(conversation:string,text:string,messageId:string):Promise<string|null>{
+    const command=text.trim();
     const path=join(this.directory,`${createHash("sha256").update(conversation).digest("hex")}.json`);
     await mkdir(this.directory,{recursive:true});let state:State={events:[],replies:[]};
     try{state=JSON.parse(await readFile(path,"utf8"));}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
@@ -63,3 +74,4 @@ export class CalendarCommands {
     const temp=`${path}.${randomUUID()}.tmp`;await writeFile(temp,JSON.stringify(state),{mode:0o600});await rename(temp,path);return reply;
   }
 }
+
