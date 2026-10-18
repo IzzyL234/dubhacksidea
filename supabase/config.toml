@@ -1,3 +1,8 @@
 [functions.owntracks]
 # OwnTracks uses HTTP Basic auth; handler.ts verifies it before processing data.
 verify_jwt = false
+
+[functions.model-dashboard]
+verify_jwt = false
+# Custom 256-bit, scoped, expiring dashboard tokens are checked inside handler.ts.
+# Supabase secret/service-role keys must never be placed in Framer.
