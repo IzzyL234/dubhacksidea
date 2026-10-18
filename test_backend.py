@@ -4,8 +4,9 @@ test_backend.py
 Unit and integration tests for:
 1. Photon-Perceptron-LinUCB workspace analysis backend (`analyze_workspace.py`, `ml_focus_model.py`, `supabase_store.py`)
 2. Zero-Setup Self-Learning AI Calendar & Productivity Engine (`/backend`: `models.py`, `bandit.py`, `rhythm.py`,
-   `scheduler.py`, `proactive.py`, `agent.py`, `main.py`) including Blank-Canvas Discovery Mode,
-   multi-entity brain-dump & routine extraction, 24-hour dynamic task splitting, and 3-stage hackathon demo presets.
+   `scheduler.py`, `proactive.py`, `agent.py`, `proposals.py`, `main.py`) including Blank-Canvas Discovery Mode,
+   multi-entity brain-dump & routine extraction, 24-hour dynamic task splitting, 3-stage hackathon demo presets,
+   and the Agentic Calendar Planner Staged Approval Queue ("Git Diff for Calendar").
 """
 
 import base64
@@ -203,6 +204,7 @@ class TestZeroSetupProductivityEngine(unittest.TestCase):
     - 7D Disjoint LinUCB Bandit (Day 1 Cold Start, Day 3 Calibrating, Day 21 Night-Owl / Library Persona)
     - Dynamic Task Splitter & Cut-Short Spillover Rescheduler
     - Proactive Simulate-Tick & 3-Stage Demo Switcher
+    - Staged Approval Queue ("Git Diff for Calendar") propose / pending / approve / reject flows
     """
 
     def setUp(self):
@@ -243,6 +245,8 @@ class TestZeroSetupProductivityEngine(unittest.TestCase):
         self.assertEqual(len(data["scheduled_blocks"]), 4)
         self.assertIn("Boom—I just added", data["reply_text"])
         self.assertIn("four 75-minute study blocks", data["reply_text"])
+        # Verify a StagedChangeProposal was also recorded for Visual UI diff inspection
+        self.assertIsNotNone(data.get("staged_proposal"))
 
     def test_3_inferred_routine_and_24h_rhythm_learning(self):
         # User states wake time & gym routine
@@ -324,6 +328,59 @@ class TestZeroSetupProductivityEngine(unittest.TestCase):
         tick_data = tick_resp.json()
         self.assertEqual(tick_data["generated_count"], 1)
         self.assertEqual(tick_data["generated_prompts"][0]["trigger_reason"], "overwhelm_intervention")
+
+    def test_7_staged_approval_engine_propose_pending_approve_and_reject(self):
+        self.client.post("/api/demo/set-stage", json={"stage": "day_21_optimized"})
+        before_cal = self.client.get("/api/calendar").json()
+        before_blocks_count = len(before_cal["scheduled_blocks"])
+
+        # 1. Propose complex multi-operation batch via POST /api/calendar/propose
+        propose_resp = self.client.post(
+            "/api/calendar/propose",
+            json={
+                "text": "Push my ML Project study block to tomorrow night and split my 3-hour paper across Wednesday and Thursday",
+                "source": "user_chat",
+            },
+        )
+        self.assertEqual(propose_resp.status_code, 200)
+        prop_data = propose_resp.json()
+        proposal = prop_data["proposal"]
+        batch_id = proposal["batch_id"]
+        self.assertEqual(proposal["status"], "pending")
+        self.assertTrue(proposal["veyzl_audit"]["requires_human_approval"])
+        self.assertGreaterEqual(len(proposal["operations"]), 2)
+        op_types = [op["op_type"] for op in proposal["operations"]]
+        self.assertIn("UPDATE_EVENT", op_types)
+        self.assertIn("SPLIT_OR_RESCHEDULE_BLOCK", op_types)
+
+        # Verify live calendar was NOT mutated while proposal is still pending
+        mid_cal = self.client.get("/api/calendar").json()
+        self.assertEqual(len(mid_cal["scheduled_blocks"]), before_blocks_count)
+
+        # 2. Verify GET /api/calendar/proposals/pending returns full before_state and after_state
+        pending_resp = self.client.get("/api/calendar/proposals/pending")
+        self.assertEqual(pending_resp.status_code, 200)
+        pending_list = pending_resp.json()["proposals"]
+        self.assertTrue(any(p["batch_id"] == batch_id for p in pending_list))
+
+        # 3. Approve batch via POST /api/calendar/proposals/{batch_id}/approve
+        approve_resp = self.client.post(f"/api/calendar/proposals/{batch_id}/approve", json={})
+        self.assertEqual(approve_resp.status_code, 200)
+        approved_data = approve_resp.json()
+        self.assertEqual(approved_data["status"], "approved")
+
+        # 4. Propose another change and test REJECT flow
+        propose2 = self.client.post(
+            "/api/calendar/propose",
+            json={"text": "Extend my ML project deadline to Sunday", "source": "user_chat"},
+        ).json()
+        batch_id_2 = propose2["proposal"]["batch_id"]
+        reject_resp = self.client.post(
+            f"/api/calendar/proposals/{batch_id_2}/reject",
+            json={"reason": "Actually keep Friday deadline"},
+        )
+        self.assertEqual(reject_resp.status_code, 200)
+        self.assertEqual(reject_resp.json()["status"], "rejected")
 
 
 if __name__ == "__main__":

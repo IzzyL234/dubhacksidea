@@ -5,6 +5,11 @@ FastAPI Server for the Zero-Setup, Self-Learning AI Calendar & Productivity Engi
 Includes:
 - CORS middleware for frontend & Photon bridge integration
 - Persistent JSON state (`backend/state.json`)
+- Agentic Calendar Planner & Staged Approval Queue ("Git Diff for Calendar"):
+  * `POST /api/calendar/propose`
+  * `GET /api/calendar/proposals/pending`
+  * `POST /api/calendar/proposals/{batch_id}/approve`
+  * `POST /api/calendar/proposals/{batch_id}/reject`
 - Blank-Canvas Discovery Mode & 3-Stage Live Hackathon Demo Switcher (`/api/demo/set-stage`)
 - Time-simulation tick endpoint (`/api/proactive/simulate-tick`)
 - Multi-entity natural language brain-dump & routine router (`/api/agent/incoming-message`)
@@ -26,6 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .agent import PhotonAgentRouter, extract_assignments_from_text, extract_recurring_events_and_routines
 from .bandit import ARMS, LinUCBOptimizer
 from .models import (
+    ApproveProposalRequest,
     Assignment,
     CutShortRequest,
     DemoStageRequest,
@@ -35,10 +41,18 @@ from .models import (
     IncomingMessageResponse,
     LearnedUserRhythm,
     OutboundPrompt,
+    ProposeCalendarRequest,
+    RejectProposalRequest,
     ScheduledBlock,
     SimulateTickRequest,
 )
 from .proactive import check_and_generate_prompts, check_calendar_sparsity
+from .proposals import (
+    approve_proposal_batch,
+    reject_proposal_batch,
+    stage_proposal_batch,
+    synthesize_calendar_proposal_batch,
+)
 from .rhythm import ZeroSetupRhythmLearner
 from .scheduler import DynamicScheduler
 
@@ -48,7 +62,6 @@ logging.basicConfig(level=logging.INFO)
 BACKEND_DIR = Path(__file__).parent
 STATE_FILE = BACKEND_DIR / "state.json"
 
-# Anchor demo clock to a clean Monday morning so MWF / Tuesday / Friday deadlines align predictably
 DEFAULT_DEMO_START_ISO = "2026-10-19T09:30:00+00:00"
 
 
@@ -63,7 +76,7 @@ def _parse_iso(ts: str) -> datetime:
 class ProductivityEngineManager:
     """
     Coordinates `EngineState`, `ZeroSetupRhythmLearner`, `LinUCBOptimizer`,
-    `DynamicScheduler`, `ProactiveEngine`, and `state.json` persistence.
+    `DynamicScheduler`, `ProactiveEngine`, `StagedChangeProposal` queue, and `state.json` persistence.
     """
 
     def __init__(self, state_path: Path = STATE_FILE):
@@ -107,19 +120,6 @@ class ProductivityEngineManager:
     # =====================================================================
 
     def apply_demo_stage(self, stage: str, user_id: str = "default_user") -> Dict[str, Any]:
-        """
-        Configures one of the 3 live hackathon presentation stages:
-        1. `blank_canvas` (or `cold_start`):
-           0 events, 0 blocks, flat uninformative rhythm prior, high LinUCB uncertainty (±1.2★).
-           Immediately queues the `discovery_brain_dump` outbound Photon prompt.
-        2. `day_3_calibrating` (or `calibrating`):
-           Classes (`CS Lecture` MWF 10-11:30, `Work` Tue 14:00-17:00) and split `ML Project`
-           blocks populated from the brain-dump conversation, with high LinUCB uncertainty (±1.2★)
-           actively probing workspace photos.
-        3. `day_21_optimized` (or `personalized`):
-           Fully learned Night-Owl / Library Persona circadian rhythm curve, tight confidence
-           intervals (±0.2★), and environment-optimized study blocks (10am-2pm Library & 10pm-1:30am Desk).
-        """
         norm_stage = stage.lower().strip()
         ref_dt = _parse_iso(DEFAULT_DEMO_START_ISO)
 
@@ -141,8 +141,8 @@ class ProductivityEngineManager:
                 rhythm=self.rhythm_learner.rhythm,
                 bandit_state=self.bandit.to_dict(),
                 prompts=[],
+                pending_proposals=[],
             )
-            # Trigger initial Discovery Mode brain-dump prompt
             initial_prompts = check_and_generate_prompts(
                 current_time=self.state.current_time,
                 events=self.state.events,
@@ -173,9 +173,9 @@ class ProductivityEngineManager:
                 rhythm=self.rhythm_learner.rhythm,
                 bandit_state=self.bandit.to_dict(),
                 prompts=[],
+                pending_proposals=[],
             )
 
-            # Populate directly via the brain-dump extractor so Day 3 reflects the user's messy reply
             router = PhotonAgentRouter(
                 state=self.state,
                 rhythm_learner=self.rhythm_learner,
@@ -187,13 +187,13 @@ class ProductivityEngineManager:
                     user_id=user_id,
                     text="I have CS lecture MWF 10-11:30, work Tuesdays 2-5, and a huge 5-hour ML project due Friday",
                     timestamp=DEFAULT_DEMO_START_ISO,
+                    auto_commit=True,
                 )
             )
             self.rhythm_learner.rhythm.onboarding_stage = (
                 "day_3_calibrating" if norm_stage == "day_3_calibrating" else "calibrating"
             )
 
-            # Queue a workspace photo check-in prompt for the first scheduled block
             photo_prompts = check_and_generate_prompts(
                 current_time=self.state.current_time,
                 events=self.state.events,
@@ -244,6 +244,7 @@ class ProductivityEngineManager:
                 rhythm=self.rhythm_learner.rhythm,
                 bandit_state=self.bandit.to_dict(),
                 prompts=[],
+                pending_proposals=[],
             )
             self.save_state()
             return self.get_calendar_payload()
@@ -281,6 +282,10 @@ class ProductivityEngineManager:
                 "ucb_score": slot_eval["ucb_score"],
             })
 
+        pending_proposals = [
+            p.model_dump() for p in self.state.pending_proposals if p.status == "pending"
+        ]
+
         return {
             "user_id": self.state.user_id,
             "demo_stage": self.state.demo_stage,
@@ -291,6 +296,7 @@ class ProductivityEngineManager:
             "assignments": [a.model_dump() for a in self.state.assignments],
             "scheduled_blocks": [b.model_dump() for b in self.state.blocks],
             "blocks": [b.model_dump() for b in self.state.blocks],
+            "pending_proposals": pending_proposals,
             "rhythm": self.rhythm_learner.rhythm.model_dump(),
             "linucb_stats": {
                 "preset_mode": self.bandit.preset_mode,
@@ -315,10 +321,11 @@ engine = ProductivityEngineManager()
 app = FastAPI(
     title="Zero-Setup Self-Learning AI Calendar & Productivity Engine",
     description=(
-        "FastAPI backend with Blank-Canvas Discovery Mode, 24-hour zero-setup circadian rhythm learning, "
+        "FastAPI backend with Agentic Calendar Planner, Staged Approval Queue ('Git Diff for Calendar'), "
+        "Blank-Canvas Discovery Mode, 24-hour zero-setup circadian rhythm learning, "
         "7D Disjoint LinUCB contextual bandit, dynamic task splitting, and Photon proactive outreach."
     ),
-    version="1.0.0",
+    version="2.0.0",
 )
 
 app.add_middleware(
@@ -350,6 +357,7 @@ async def health_check():
         "current_time": engine.state.current_time,
         "events_count": len(engine.state.events),
         "blocks_count": len(engine.state.blocks),
+        "pending_proposals_count": sum(1 for p in engine.state.pending_proposals if p.status == "pending"),
         "onboarding_stage": engine.rhythm_learner.rhythm.onboarding_stage,
     }
 
@@ -357,19 +365,128 @@ async def health_check():
 @app.get("/api/calendar", tags=["Calendar & Learning State"])
 async def get_calendar():
     """
-    Returns `FixedEvent`s, `ScheduledBlock`s, `Assignment`s, `LearnedUserRhythm`
-    (24-hour activity probability curve), calendar sparsity, and Disjoint LinUCB stats.
+    Returns `FixedEvent`s, `ScheduledBlock`s, `Assignment`s, `pending_proposals`,
+    `LearnedUserRhythm` (24-hour activity probability curve), calendar sparsity, and Disjoint LinUCB stats.
     """
     return engine.get_calendar_payload()
 
+
+# =====================================================================
+# Staged Approval Queue ("Git Diff for Calendar") Endpoints
+# =====================================================================
+
+@app.post("/api/calendar/propose", tags=["Staged Approval Queue (Git Diff for Calendar)"])
+async def propose_calendar_changes(payload: ProposeCalendarRequest):
+    """
+    Passes user text or proactive trigger to the Agentic Calendar Planner (LLM + LinUCB & Rhythm context),
+    generates a `StagedChangeProposal` batch with `before_state`, `after_state`, and `veyzl_audit`,
+    saves it to `pending_proposals` (`status="pending"`), and returns both the conversational explanation
+    and the structured diff list without immediately mutating live calendar state.
+    """
+    batch = synthesize_calendar_proposal_batch(
+        user_text=payload.text,
+        state=engine.state,
+        rhythm_learner=engine.rhythm_learner,
+        bandit=engine.bandit,
+        scheduler=engine.scheduler,
+        reference_time=payload.timestamp or engine.state.current_time,
+    )
+    if not batch.operations:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not identify calendar mutations in request. Try describing classes, study blocks, deadlines, or edits.",
+        )
+
+    staged = stage_proposal_batch(
+        batch=batch,
+        state=engine.state,
+        rhythm_learner=engine.rhythm_learner,
+        bandit=engine.bandit,
+        source=payload.source,
+    )
+    engine.save_state()
+
+    return {
+        "status": "staged",
+        "batch_id": staged.batch_id,
+        "proposal_id": staged.proposal_id,
+        "summary_message": staged.summary_message,
+        "veyzl_audit": staged.veyzl_audit.model_dump(),
+        "operations_count": len(staged.operations),
+        "proposal": staged.model_dump(),
+    }
+
+
+@app.get("/api/calendar/proposals/pending", tags=["Staged Approval Queue (Git Diff for Calendar)"])
+async def get_pending_calendar_proposals(
+    include_all: bool = Query(False, description="If True, returns approved/rejected proposals too"),
+):
+    """
+    Returns all `"pending"` `StagedChangeProposal` batches with full `before_state` and `after_state`
+    blocks so the Web Visual UI can render ghost/dashed red/green preview blocks on the calendar grid.
+    """
+    if include_all:
+        items = engine.state.pending_proposals
+    else:
+        items = [p for p in engine.state.pending_proposals if p.status in ("pending", "modified")]
+
+    return {
+        "count": len(items),
+        "proposals": [p.model_dump() for p in items],
+    }
+
+
+@app.post("/api/calendar/proposals/{batch_id}/approve", tags=["Staged Approval Queue (Git Diff for Calendar)"])
+async def approve_calendar_proposal(batch_id: str, payload: Optional[ApproveProposalRequest] = None):
+    """
+    Approves a `StagedChangeProposal` batch (either the full batch or an optional subset of `proposal_ids`
+    for partial approval), executes the mutations on `/backend` state (`state.json`), and marks the proposal `"approved"`.
+    """
+    req = payload or ApproveProposalRequest()
+    try:
+        res = approve_proposal_batch(
+            state=engine.state,
+            rhythm_learner=engine.rhythm_learner,
+            bandit=engine.bandit,
+            scheduler=engine.scheduler,
+            batch_id=batch_id,
+            proposal_ids=req.proposal_ids,
+        )
+        engine.save_state()
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/calendar/proposals/{batch_id}/reject", tags=["Staged Approval Queue (Git Diff for Calendar)"])
+async def reject_calendar_proposal(batch_id: str, payload: Optional[RejectProposalRequest] = None):
+    """
+    Discards the staged changes for `batch_id`, marks the proposal `"rejected"`,
+    and feeds a negative preference signal back to the rhythm learner so the agent asks how to adjust.
+    """
+    req = payload or RejectProposalRequest()
+    try:
+        res = reject_proposal_batch(
+            state=engine.state,
+            rhythm_learner=engine.rhythm_learner,
+            bandit=engine.bandit,
+            batch_id=batch_id,
+            reason=req.reason,
+        )
+        engine.save_state()
+        return res
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# =====================================================================
+# Proactive Outreach, Incoming Message Router, & Demo Endpoints
+# =====================================================================
 
 @app.get("/api/proactive/pending", tags=["Proactive Photon Outreach"])
 async def get_pending_proactive_prompts(
     include_resolved: bool = Query(False, description="Include already resolved prompts"),
 ):
-    """
-    Returns queued `OutboundPrompt` messages for the Photon service to text the user.
-    """
     if include_resolved:
         prompts = engine.state.prompts
     else:
@@ -386,9 +503,6 @@ async def get_pending_proactive_prompts(
 
 @app.post("/api/proactive/simulate-tick", tags=["Proactive Photon Outreach"])
 async def simulate_proactive_tick(payload: Optional[SimulateTickRequest] = None):
-    """
-    Advances simulated time or triggers a proactive event immediately for a live hackathon demo.
-    """
     req = payload or SimulateTickRequest()
     cur_dt = _parse_iso(engine.state.current_time)
 
@@ -397,7 +511,6 @@ async def simulate_proactive_tick(payload: Optional[SimulateTickRequest] = None)
     elif req.advance_minutes is not None:
         cur_dt = cur_dt + timedelta(minutes=int(req.advance_minutes))
     else:
-        # Default tick: advance 15 minutes or jump 10 minutes into the next scheduled block
         next_blk = next(
             (b for b in engine.state.blocks if b.status == "scheduled" and _parse_iso(b.start_time) >= cur_dt),
             None,
@@ -436,11 +549,6 @@ async def simulate_proactive_tick(payload: Optional[SimulateTickRequest] = None)
     tags=["Natural Language Agent & Brain-Dump Router"],
 )
 async def handle_incoming_message(payload: IncomingMessageRequest):
-    """
-    Processes an incoming Photon text, messy multi-entity brain-dump, routine mention,
-    or session rating. Updates `LearnedUserRhythm` + `LinUCB`, schedules split study blocks,
-    and returns the conversational SMS reply.
-    """
     router = PhotonAgentRouter(
         state=engine.state,
         rhythm_learner=engine.rhythm_learner,
@@ -454,11 +562,6 @@ async def handle_incoming_message(payload: IncomingMessageRequest):
 
 @app.post("/api/blocks/{block_id}/cut-short", tags=["Dynamic Task Splitter & Scheduler"])
 async def cut_block_short(block_id: str, payload: CutShortRequest):
-    """
-    Truncates a scheduled or in-progress study block, updates `LearnedUserRhythm` and `LinUCB`
-    (lowering late-night probability if cut short due to fatigue), and redistributes
-    the unfinished spillover minutes to future high-UCB slots before the deadline.
-    """
     try:
         result = engine.scheduler.cut_session_short(
             block_id=block_id,
@@ -487,12 +590,6 @@ async def cut_block_short(block_id: str, payload: CutShortRequest):
 
 @app.post("/api/demo/set-stage", tags=["Live Hackathon Demo Presets"])
 async def set_demo_stage(payload: DemoStageRequest):
-    """
-    Switches between the 3 live hackathon presentation presets:
-    - `"blank_canvas"` (or `"cold_start"`): 0 events, triggers proactive brain-dump request.
-    - `"day_3_calibrating"` (or `"calibrating"`): Classes & split assignments from text conversation, wide ±1.2★ bounds probing photos.
-    - `"day_21_optimized"` (or `"personalized"`): Learned Night-Owl / Library Persona, tight ±0.2★ bounds, environment-optimized schedule.
-    """
     try:
         cal = engine.apply_demo_stage(payload.stage, user_id=payload.user_id or "default_user")
         return {
