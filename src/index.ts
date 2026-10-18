@@ -1,3 +1,5 @@
+import {configuredDashboardAccess} from "./dashboard-access.ts";
+import {dashboardCommand} from "./dashboard-command.ts";
 import {InsightsPublisher} from "./insights-publisher.ts";
 import {configuredLearningStore} from "./learning-store.ts";
 import insightSeed from "../data/seed_sessions.json";
@@ -59,6 +61,7 @@ console.log("[delivery] process",JSON.stringify({run:runTag,pid:process.pid}));
 const conversations = new Map<string, Turn[]>();
 const studySessions = new StudySessions().enableDemoPrior();
 const sessionContext=new SessionContext();
+const dashboardAccess=configuredDashboardAccess();
 const feedbackFlow = new FeedbackFlow(undefined, undefined, {
   begin: key => studySessions.beginFeedback(key),
   afterSave: async record => {
@@ -230,6 +233,8 @@ for await (const [space, envelope] of app.messages) {
   if (!incoming) continue;
 
   try {
+    const dashboardReply=await dashboardCommand(dashboardAccess,space.id,incoming,message.id);
+    if(dashboardReply!==null){await space.send(dashboardReply);continue;}
     const scheduleReply=await scheduleReviews.handle(space.id,incoming);
     if(scheduleReply!==null){await space.send(scheduleReply);void pollScheduleReviews();continue;}
     const departureAnswer=await departures.answer(space.id,incoming);

@@ -10,7 +10,8 @@ async function load(action){
  if(busy)return;busy=true;root.querySelectorAll('button').forEach(b=>b.disabled=true);status.className='';status.textContent=action==='approve'?'Checking the event and destination before applying…':action==='deny'?'Dismissing this suggestion…':'Loading your private review…';
  try{
   if(!/^[A-Za-z0-9_-]{43}$/.test(key))throw Error('Open the full private review link from your bot message. A dashboard code cannot approve calendar changes.');
-  const response=await fetch('/api/learning/reviews/'+id+(action?'/'+action:''),{method:action?'POST':'GET',headers:{Authorization:'Bearer '+key},cache:'no-store',redirect:'error',signal:AbortSignal.timeout(25000)}),data=await response.json();
+  const response=await fetch('/api/learning/reviews/'+id+(action?'/'+action:''),{method:action?'POST':'GET',headers:{Authorization:'Bearer '+key},cache:'no-store',redirect:'error',signal:AbortSignal.timeout(25000)});
+  let data;try{data=await response.json();}catch{throw Error('The calendar service is temporarily unavailable. Reload this same private link to check safely.');}
   if(!response.ok)throw Error(data.error??'Review temporarily unavailable. Retry this link.');
   render(data.review);status.textContent=data.review.status==='applied'?'Approved · Calendar updated.':data.review.status==='skipped'?'Denied · Your calendar is unchanged.':data.review.status==='stale'?'The calendar changed. Request a fresh review; nothing was moved.':'Review the suggestion below. All times are Pacific.';
  }catch(e){status.className='error';status.textContent=e.name==='TimeoutError'?'Could not confirm the result. Reload this same link to check safely.':e.message;}finally{busy=false;root.querySelectorAll('button').forEach(b=>b.disabled=false);}
