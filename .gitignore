@@ -20,3 +20,15 @@ data/reminders/
 data/calendar-commands/
 
 data/proactivity/
+
+# Private runtime state (never publish)
+data/message-delivery/
+data/session-context/
+data/runtime/
+__pycache__/
+*.pyc
+
+data/user_models/
+
+data/photos_log.json
+data/sessions_history.jsonl

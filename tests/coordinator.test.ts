@@ -1,3 +1,5 @@
+import {beforeEach} from "bun:test";
+const previousProvider=process.env.AI_PROVIDER;beforeEach(()=>{process.env.AI_PROVIDER="gemini";});afterEach(()=>{if(previousProvider===undefined)delete process.env.AI_PROVIDER;else process.env.AI_PROVIDER=previousProvider;});
 import type {EventInput} from "../src/calendar-types.ts";
 import {afterEach,expect,test} from "bun:test";
 import {mkdtemp,rm,readFile,readdir} from "node:fs/promises";
@@ -56,12 +58,12 @@ test("Gemini is one bounded request with learned options; blocked output never f
  const d=await root(),learning=await sessions(d,histories(true)).proactiveOptions("chat","library",90);let calls=0;
  const request=(async(url,init)=>{calls++;expect(String(url)).not.toContain("test-only");expect((init?.headers as Record<string,string>)["x-goog-api-key"]).toBe("test-only");const body=JSON.parse(String(init?.body));expect(JSON.parse(body.contents[0].parts[0].text).learning.observations).toBe(80);return Response.json({candidates:[{finishReason:"STOP",content:{parts:[{thought:true,text:"private thinking"},{text:JSON.stringify({action:"offer_study",reason:"useful_window",confidence:.9,optionId:learning.options[0]!.id})}]}}]});}) as typeof fetch;
  const decision=await decidePrompt({...facts,learning},request);expect(decision.optionId).toBe(learning.options[0]!.id);expect(calls).toBe(1);
- await expect(decidePrompt({...facts,learning},async()=>Response.json({candidates:[{finishReason:"SAFETY"}]}))).rejects.toThrow("Incomplete");
+ await expect(decidePrompt({...facts,learning},async()=>Response.json({candidates:[{finishReason:"SAFETY"}]}))).rejects.toThrow("complete reply");
  expect(coordinatorProvider()).toBe("gemini");
 });
-test("Grok uses the same learned schema and explicit provider selection wins",async()=>{
- process.env.STUDY_COORDINATOR_PROVIDER="grok";process.env.XAI_API_KEY="test-only";process.env.GEMINI_API_KEY="test-gemini";process.env.GEMINI_MODEL="test-model";
- expect(coordinatorProvider()).toBe("grok");
- const decision=await decidePrompt(facts,(async(url,init)=>{expect(String(url)).toBe("https://api.x.ai/v1/responses");const body=JSON.parse(String(init?.body));expect(body.text.format.schema.required).toContain("optionId");return Response.json({status:"completed",output:[{type:"message",content:[{type:"output_text",text:'{"action":"stay_quiet","reason":"uncertain_context","confidence":0.8,"optionId":null}'}]}]});}) as typeof fetch);expect(decision.action).toBe("stay_quiet");
- process.env.STUDY_COORDINATOR_PROVIDER="unsupported";expect(()=>coordinatorProvider()).toThrow();
+test("legacy Grok settings cannot route requests away from Gemini",async()=>{
+ process.env.STUDY_COORDINATOR_PROVIDER="grok";process.env.GEMINI_API_KEY="test-only";process.env.GEMINI_MODEL="test-model";
+ expect(coordinatorProvider()).toBe("gemini");
+ const result=await decidePrompt(facts,(async(url,init)=>{expect(String(url)).toContain("generativelanguage.googleapis.com");expect(JSON.parse(String(init?.body)).generationConfig.responseJsonSchema.required).toContain("optionId");return Response.json({candidates:[{finishReason:"STOP",content:{parts:[{text:JSON.stringify({action:"stay_quiet",reason:"uncertain_context",confidence:.8,optionId:null})}]}}]});}) as typeof fetch);
+ expect(result.action).toBe("stay_quiet");
 });

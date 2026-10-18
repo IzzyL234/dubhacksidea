@@ -2,7 +2,15 @@ import {createHash} from "node:crypto";
 import type {CalendarGateway} from "./calendar-types.ts";
 import {busyIntervals} from "./open-time.ts";
 import {TIMEZONE} from "./time.ts";
-export type StudyBooking={start:number;end:number;status:"pending"|"booked";eventId?:string};
+export type StudyBooking={start:number;end:number;status:"pending"|"booked";eventId?:string;completed?:boolean};
+export async function logCompletedStudy(gateway:CalendarGateway,sessionId:string,plan:Pick<StudyBooking,"start"|"end">):Promise<string>{
+ const {start,end}=plan;
+ if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start||end-start>24*3600000)throw Error("INVALID_COMPLETED_STUDY");
+ const id=studyEventId(sessionId);
+ const event=await gateway.create({id,summary:"Study session",description:"Completed study session: actual tracked start and finish times.",start:{dateTime:new Date(start).toISOString(),timeZone:TIMEZONE},end:{dateTime:new Date(end).toISOString(),timeZone:TIMEZONE},reminders:{useDefault:false},extendedProperties:{private:{studyAgentSession:sessionId}}});
+ if(event.id!==id||event.status==="cancelled"||event.attendees?.length||event.extendedProperties?.private?.studyAgentSession!==sessionId||Date.parse(event.start?.dateTime??"")!==start||Date.parse(event.end?.dateTime??"")!==end)throw Error("STUDY_BOOKING_CHANGED");
+ return id;
+}
 export function studyEventId(sessionId:string):string{return "agent"+createHash("sha256").update(`study:${sessionId}`).digest("hex").slice(0,40);}
 export async function bookStudyEvent(gateway:CalendarGateway,sessionId:string,plan:Pick<StudyBooking,"start"|"end">):Promise<string>{
  const {start,end}=plan;

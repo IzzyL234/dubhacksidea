@@ -1,7 +1,7 @@
 {
-  "version": 2,
+  "version": 1,
   "model_type": "LinUCB_Ridge_13D",
-  "observations_count": 44,
+  "observations_count": 41,
   "feature_names": [
     "bias",
     "location:dorm_room",
@@ -18,34 +18,34 @@
     "duration"
   ],
   "theta_productivity": [
-    -0.126,
-    -0.2733,
-    0.0076,
-    0.1397,
-    -0.0752,
-    0.2342,
-    0.2931,
-    -0.0614,
-    0.0242,
-    -0.4471,
-    0.6247,
-    0.2472,
-    -0.0714
+    -0.1379,
+    -0.2368,
+    0.0165,
+    0.1606,
+    -0.0712,
+    0.2481,
+    0.3064,
+    -0.0969,
+    -0.0921,
+    -0.4239,
+    0.5632,
+    0.2866,
+    -0.0582
   ],
   "theta_mood": [
-    -0.3539,
-    -0.1326,
-    -0.0921,
-    -0.0391,
-    0.0013,
-    0.0811,
-    0.0906,
-    0.2432,
-    0.0532,
-    -0.5155,
-    0.6416,
-    0.3234,
-    0.0285
+    -0.3847,
+    -0.0328,
+    -0.0856,
+    0.0072,
+    0.0091,
+    0.1194,
+    0.1325,
+    0.1485,
+    -0.2626,
+    -0.4611,
+    0.4774,
+    0.439,
+    0.0678
   ],
   "space_visit_counts": {
     "dorm_room:bed": 7,
@@ -54,12 +54,10 @@
     "cafe:chair": 2,
     "dorm_room:beanbag": 2,
     "classroom:chair": 2,
-    "cafe:shared_table": 5,
+    "cafe:shared_table": 4,
     "library:desk": 8,
     "classroom:desk": 4,
-    "home:desk": 3,
-    "library:beanbag": 1,
-    "other:beanbag": 1
+    "home:desk": 3
   },
-  "updated_at": "2026-10-18T06:12:15.704006+00:00"
+  "updated_at": "2026-10-18T04:59:04.031985+00:00"
 }

@@ -1,3 +1,4 @@
+import {preparePhoto} from "./photo-input.ts";
 export type Workspace = { clutter_score: number; lighting: "dim" | "bright"; ergonomics: number | null };
 export function validateWorkspace(value: unknown): Workspace {
   const v = value as Record<string, unknown> | null;
@@ -11,8 +12,8 @@ export async function analyzePhoto(bytes: Uint8Array, mimeType: string,
   key = process.env.PERCEPTRON_API_KEY ?? process.env.PERCEPTRON_TOKEN,
   request: (url: string, init?: RequestInit) => Promise<Response> = fetch): Promise<Workspace> {
   if (!key) throw new Error("VISION_NOT_CONFIGURED");
-  if (!["image/jpeg", "image/png", "image/webp"].includes(mimeType) || !bytes.length || bytes.length > 8_000_000)
-    throw new Error("Use a JPEG, PNG, or WebP under 8 MB");
+  const photo=await preparePhoto(bytes);
+  bytes=photo.bytes;mimeType=photo.mime;
   const response = await request("https://api.perceptron.inc/v1/chat/completions", {
     method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     redirect: "error", signal: AbortSignal.timeout(90_000),

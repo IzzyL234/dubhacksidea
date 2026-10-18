@@ -1,6 +1,6 @@
 import {StudyLearner,type Context} from "./learning.ts";
 export type StudyOption={id:string;minutes:number;basis:"historical"|"unknown";studySpace:Context["study_space"]|null;predictedProductivity:number|null;predictedMood:number|null;uncertainty:number|null;selectionScore:number|null;relevantSessions:number;profileAgeDays:number|null};
-export type LearningSummary={observations:number;cloudUnavailable:boolean;currentWorkspaceKnown:false;options:StudyOption[]};
+export type LearningSummary={sessionContext?:{confirmedNotes:number;recent:{daysAgo:number;productivity:number;mood:number;sentiment:string;social:string;socialEffect:string;factors:string[]}[]};observations:number;cloudUnavailable:boolean;currentWorkspaceKnown:false;options:StudyOption[]};
 export function studyOptions(learner:StudyLearner,contexts:Context[],place:string,freeMinutes:number,observations:number,cloudUnavailable:boolean,now:number):LearningSummary{
  const minutes=[...new Set([25,Math.min(45,Math.floor(freeMinutes))])].filter(m=>m>=25&&m<=freeMinutes);
  const matching=contexts.filter(c=>c.location===place).sort((a,b)=>Date.parse(b.timestamp)-Date.parse(a.timestamp));

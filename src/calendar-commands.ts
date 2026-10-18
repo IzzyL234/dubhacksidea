@@ -1,16 +1,17 @@
+import type {CalendarIntent} from "./calendar-language.ts";
 import { createHash,randomUUID } from "node:crypto";
 import { mkdir,readFile,writeFile,rename } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import type { CalendarGateway,DemoEvent,EventInput } from "./calendar-types.ts";
 import { formatTime,parseCalendarTime,TIMEZONE } from "./time.ts";
-type State={listedAt?:number;events:DemoEvent[];replies:{id:string;reply:string}[]};
+type State={pending?:{texts:string[];expires:number};plans?:Record<string,string>;listedAt?:number;events:DemoEvent[];replies:{id:string;reply:string}[]};
 export class CalendarCommands {
   private locks=new Map<string,Promise<unknown>>();
-  constructor(private gateway:CalendarGateway,private directory=fileURLToPath(new URL("../data/calendar-commands/",import.meta.url)),private now=Date.now){}
+  constructor(private gateway:CalendarGateway,private directory=fileURLToPath(new URL("../data/calendar-commands/",import.meta.url)),private now=Date.now,private interpret?: (text:string,previous:string[],now:number)=>Promise<CalendarIntent>){}
   async handle(conversation:string,text:string,messageId:string):Promise<string|null>{
     const command=text.trim();
-    if(!/^(calendar events|calendar help|add event(?:\s|$)|move event(?:\s|$)|rename event(?:\s|$))/i.test(command))return null;
+    if(!this.interpret&&!/^(calendar events|calendar help|add event(?:\s|$)|move event(?:\s|$)|rename event(?:\s|$))/i.test(command))return null;
     // Serialize each chat's read/write cycle, including replay checks and external writes.
     // Separate chats remain independent, and rejected requests do not poison the queue.
     const previous=this.locks.get(conversation)??Promise.resolve();
@@ -20,11 +21,27 @@ export class CalendarCommands {
     finally{if(this.locks.get(conversation)===next)this.locks.delete(conversation);}
   }
   private async handleSerialized(conversation:string,text:string,messageId:string):Promise<string|null>{
-    const command=text.trim();
+    let command=text.trim();
     const path=join(this.directory,`${createHash("sha256").update(conversation).digest("hex")}.json`);
     await mkdir(this.directory,{recursive:true});let state:State={events:[],replies:[]};
     try{state=JSON.parse(await readFile(path,"utf8"));}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
     const old=state.replies.find(r=>r.id===messageId);if(old)return old.reply;
+    const persist=async()=>{const temp=`${path}.${randomUUID()}.tmp`;await writeFile(temp,JSON.stringify(state),{mode:0o600});await rename(temp,path);};
+    if(this.interpret&&!/^(calendar events|calendar help|add event(?:\s|$)|move event(?:\s|$)|rename event(?:\s|$))/i.test(command)){
+      if(state.plans?.[messageId])command=state.plans[messageId]!;
+      else {
+        const previous=state.pending&&state.pending.expires>this.now()?state.pending.texts:[];
+        const intent=await this.interpret(text,previous,this.now());
+        if(intent.action==="none"){delete state.pending;await persist();return null;}
+        if(intent.action==="clarify"){
+          state.pending={texts:[...previous,text].slice(-6),expires:this.now()+15*60000};
+          const answer=intent.question!;state.replies=[...state.replies,{id:messageId,reply:answer}].slice(-40);await persist();return answer;
+        }
+        command=intent.action==="list"?"calendar events":`add event ${intent.title} | ${intent.start} | ${intent.end}`;
+        delete state.pending;state.plans={...state.plans,[messageId]:command};
+        state.plans=Object.fromEntries(Object.entries(state.plans).slice(-40));await persist();
+      }
+    }
     let reply:string;
     try{
       if(/^calendar events$/i.test(command)){
@@ -44,7 +61,7 @@ export class CalendarCommands {
           const title=add[1]!.trim();if(title.length>160)throw Error("Use a title under 160 characters.");
           const requestKey=createHash("sha256").update(`${conversation}:${messageId}`).digest("hex");
           const created=await this.gateway.create({id:"agent"+requestKey.slice(0,40),summary:title,...range(),reminders:{useDefault:false},extendedProperties:{private:{studyAgentRequest:requestKey}}});
-          reply=`Added “${created.summary??title}” to Hackathon Demo. Text calendar events to see it.`;
+          reply=`Added “${created.summary??title}” to Hackathon Demo. ${formatTime(Date.parse(created.start?.dateTime??range().start.dateTime))}–${formatTime(Date.parse(created.end?.dateTime??range().end.dateTime))} (Pacific). Text calendar events to see it.`;
         }else if(move||rename){
           if(state.listedAt===undefined||this.now()-state.listedAt>15*60000)throw Error("Text calendar events first so I can identify which event you mean.");
           const selected=state.events[Number((move??rename)![1])-1];

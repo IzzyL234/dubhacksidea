@@ -7,6 +7,8 @@
 // 2. Links the photo session to `StudySessions` and triggers follow-up rating check-in (`FeedbackFlow`)
 //    when the user finishes studying ("done" / "rate session") or chats with Grok (`XAI_API_KEY`).
 
+import {acquireInstance,AlreadyRunning} from '../src/single-instance.ts';
+import {fileURLToPath} from 'node:url';
 import { Spectrum } from 'spectrum-ts';
 import { imessage } from '@spectrum-ts/imessage';
 import { createHash } from 'node:crypto';
@@ -50,9 +52,14 @@ if (!projectId || !projectSecret) {
   process.exit(1);
 }
 
+try { const release=acquireInstance(fileURLToPath(new URL('../data/runtime/bot-instance.json',import.meta.url))); process.once('exit',release); } catch(error) { if(error instanceof AlreadyRunning) {console.log(error.message);process.exit(0);} throw error; }
+
 console.log('🚀 Connecting to Photon Spectrum Cloud...');
 console.log(`📱 Project ID: ${projectId}`);
 console.log(`📡 Perceptron + LinUCB Backend URL: ${BACKEND_URL}`);
+
+// Track latest analyzed photo session ID per user key (`conversation_key`) so ratings link to `workspace_photos_log`
+const latestPhotoSessionByUser = new Map();
 
 // Initialize shared StudySessions & FeedbackFlow for training the per-user LinUCB model
 const studySessions = new StudySessions();
@@ -60,13 +67,14 @@ const feedbackFlow = new FeedbackFlow(undefined, undefined, {
   begin: (key) => studySessions.beginFeedback(key),
   afterSave: async (record) => {
     await studySessions.completeFeedback(record);
-    // Sync completed rating back to the FastAPI per-user LinUCB model & Supabase
+    // Sync completed rating back to the FastAPI per-user LinUCB model & Supabase `workspace_photos_log`
+    const linkedPhotoSessionId = latestPhotoSessionByUser.get(record.conversation_key) || record.session_id || record.id;
     try {
       await fetch(`${BACKEND_URL}/api/rate-session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session_id: record.session_id || record.id,
+          session_id: linkedPhotoSessionId,
           user_id: record.conversation_key,
           actual_rating: record.productivity_rating,
           mood_rating: record.mood_rating,
@@ -75,16 +83,13 @@ const feedbackFlow = new FeedbackFlow(undefined, undefined, {
         }),
         signal: AbortSignal.timeout(10000)
       });
-      console.log(`📈 Updated per-user LinUCB model (${record.conversation_key.slice(0, 8)}...): Productivity=${record.productivity_rating}/5, Mood=${record.mood_rating}/5`);
+      console.log(`📈 Updated per-user LinUCB model (${record.conversation_key.slice(0, 8)}..., session=${linkedPhotoSessionId}): Productivity=${record.productivity_rating}/5, Mood=${record.mood_rating}/5`);
     } catch (e) {
       console.warn('Could not sync rating to FastAPI backend:', e.message);
     }
   },
   beforeUpload: (record) => studySessions.ensureCloud(record)
 });
-
-// Track latest analyzed photo session ID per space so quick ratings link cleanly
-const latestPhotoSessionBySpace = new Map();
 
 async function sendToPerceptronBackend(imageBuffer, mimeType = 'image/jpeg', userId = 'default_user') {
   const formData = new FormData();
@@ -174,7 +179,11 @@ try {
 
           const buffer = await att.read();
           const analysis = await sendToPerceptronBackend(buffer, att.mimeType || 'image/jpeg', userKey);
-          latestPhotoSessionBySpace.set(space.id, analysis.session_id);
+          latestPhotoSessionByUser.set(userKey, analysis.session_id);
+
+          // If a previous session was still active or awaiting feedback, discard it cleanly before autostarting the new photo session
+          await studySessions.handle(space.id, 'discard session', `${message.id}:autoclear`);
+          await feedbackFlow.handle(space.id, 'reset', `${message.id}:autoreset`);
 
           // Ensure a linked StudySession is active & populated with Perceptron context for `feedbackFlow`
           await studySessions.handle(space.id, 'start studying', `${message.id}:autostart`);

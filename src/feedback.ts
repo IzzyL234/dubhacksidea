@@ -225,7 +225,7 @@ export class FeedbackFlow {
       mood: "How was your mood? 1–5 (1 = very low, 5 = very good).",
       distraction: "How distracted were you? 1–5 (1 = not distracted, 5 = very distracted).",
       confirm_source: "Reply yes to confirm or no to choose again.",
-      source: "What best describes the distraction? Reply interruption (1: a friend stopped by, an urgent call, or personal worries), setup (2: persistent noise in your surroundings or uncomfortable seating), or unsure (3). You can also reply skip, or describe it in a sentence for Grok to interpret and ask you to confirm. This records your judgment, not a proven cause." }[step];
+      source: "What best describes the distraction? Reply interruption (1: a friend stopped by, an urgent call, or personal worries), setup (2: persistent noise in your surroundings or uncomfortable seating), or unsure (3). You can also reply skip, or describe it in a sentence for Gemini to interpret and ask you to confirm. This records your judgment, not a proven cause." }[step];
   }
 
   private async save(directory: string, key: string, draft: Draft, source: Source | null, attribution: DistractionAttribution | null = null): Promise<"cloud" | "queued" | "local"> {

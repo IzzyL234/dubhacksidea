@@ -10,6 +10,16 @@ function pair(id='11111111-1111-4111-8111-111111111111',rating=1):LearningPair{
 }
 async function root(){const d=await mkdtemp(join(tmpdir(),'cloud-learning-'));dirs.push(d);return d;}
 async function ready(s:StudySessions){await s.handle('private-chat','start studying','start');await s.handle('private-chat','library desk 45','place');await s.handle('private-chat','workspace bright 3 7','env');}
+
+test('natural study questions rank real personal history and do not invent current workspaces',async()=>{
+ const d=await root();let exports=0;const rows=[pair()];
+ const s=new StudySessions(join(d,'sessions'),{put:async()=>{},putModelParams:async()=>{exports++;}},join(d,'feedback'),'missing-demo-file',undefined,{load:async()=>rows});
+ const result=await s.handle('private-chat','where should I study?','recommend-one');
+ expect(result).toContain('1 completed linked check-in');expect(result).toContain('library desk');expect(result).toContain('estimated productivity');expect(result).not.toContain('cafe');expect(result).not.toContain('LinUCB');expect(await s.handle('private-chat','study recommendations','friendly')).toBe(result);expect(exports).toBe(0);
+ rows[0]!.feedback_record.productivity_rating=5;rows[0]!.feedback_record.mood_rating=5;
+ expect(await s.handle('private-chat','can you suggest a place to study','recommend-two')).not.toBe(result);
+ expect(await s.handle('different-chat','where should I study?','other')).toContain('no completed linked sessions');
+});
 test('cloud history changes the next prediction and survives restart without local past sessions',async()=>{
  const d=await root();const rows=[pair()];const source={load:async()=>rows};const make=()=>new StudySessions(join(d,'sessions'),null,join(d,'feedback'),undefined,undefined,source);
  const s=make();await ready(s);const first=await s.handle('private-chat','study score','one');expect(first).toContain('1 of your linked check-ins');expect(first).toContain('Supabase history');

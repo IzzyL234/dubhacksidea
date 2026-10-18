@@ -7,7 +7,7 @@ import type { StudyBlock } from "./study-events.ts";
 type Delivery = { block: StudyBlock; startAttempted?: boolean; sessionId?: string; endAttempted?: boolean };
 type State = {
   conversation?: string; enabled: boolean; quietEnabled?:boolean; quietStart: number; quietEnd: number;
-  events: Record<string,Delivery>; pending?: {key:string;expires:number;kind?:"place";plannedMinutes?:number}; lastPrompt?:number; snoozeUntil?:number;
+  events: Record<string,Delivery>; pending?: {key:string;expires:number;kind?:"place"|"checkin";plannedMinutes?:number}; lastPrompt?:number; snoozeUntil?:number;
   replies:{id:string;conversation:string;reply:string}[];
 };
 export type ReminderDependencies = {
@@ -17,8 +17,11 @@ export type ReminderDependencies = {
   start: (conversation:string,block:StudyBlock)=>Promise<{id:string;reply:string}|null>;
   active: (conversation:string,id:string)=>Promise<boolean>;
   checkIn: (conversation:string)=>Promise<boolean>;
-  observe?:(conversation:string)=>Promise<{allow:boolean;message?:string;kind?:"place";plannedMinutes?:number}>;
-  evaluate?:(conversation:string,block:StudyBlock)=>Promise<{allow:boolean;message?:string;kind?:"place";plannedMinutes?:number}>;
+  refresh?:(conversation:string)=>Promise<void>;
+  promptBudget?:number;
+  coordinate?:(conversation:string,block:StudyBlock|undefined,calendarAvailable:boolean)=>Promise<{allow:boolean;message?:string;kind?:"place"|"checkin";plannedMinutes?:number}>;
+  observe?:(conversation:string)=>Promise<{allow:boolean;message?:string;kind?:"place"|"checkin";plannedMinutes?:number}>;
+  evaluate?:(conversation:string,block:StudyBlock)=>Promise<{allow:boolean;message?:string;kind?:"place"|"checkin";plannedMinutes?:number}>;
   resolvePlace?:(conversation:string,accept:boolean)=>Promise<string>;
   confirm?:(conversation:string,block:StudyBlock)=>Promise<boolean>;
   audit?:(conversation:string,reason:string)=>Promise<void>;
@@ -128,7 +131,8 @@ export class StudyReminders {
           }
         }
       }
-      const blocks=(await this.deps.events(now)).sort((a,b)=>a.start-b.start);
+      let calendarAvailable=true,blocks:StudyBlock[]=[];
+      try{blocks=(await this.deps.events(now)).sort((a,b)=>a.start-b.start);}catch(error){if(!this.deps.coordinate)throw error;calendarAvailable=false;}
       const current=new Map(blocks.map(b=>[b.key,b]));
       if(state.pending&&(state.pending.expires<now||(state.pending.kind!=="place"&&!current.has(state.pending.key))))delete state.pending;
       for(const [key,delivery]of Object.entries(state.events)){
@@ -145,18 +149,30 @@ export class StudyReminders {
         await this.deps.send(state.conversation,"Your calendar study block has ended. When you're finished, text done for your quick check-in. If you're still studying, keep going—I'll stay quiet.");
         return;
       }
-      if(state.pending||await this.deps.busy(state.conversation)){await this.audit(state.conversation,state.pending?"pending_prompt":"unfinished_session_or_checkin");await this.save(state);return;}
+      if(state.pending||await this.deps.busy(state.conversation)){await this.deps.refresh?.(state.conversation);await this.audit(state.conversation,state.pending?"pending_prompt":"unfinished_session_or_checkin");await this.save(state);return;}
       if(now<(state.snoozeUntil??0)){await this.audit(state.conversation,"skipped_cooldown");await this.save(state);return;}
       if(state.lastPrompt!==undefined&&now-state.lastPrompt<10*60_000){await this.audit(state.conversation,"prompt_cooldown");await this.save(state);return;}
       const today=new Date(now).toLocaleDateString("en-CA",{timeZone:"America/Los_Angeles"});
       const attemptsToday=Object.values(state.events).filter(d=>d.startAttempted&&new Date(d.block.start).toLocaleDateString("en-CA",{timeZone:"America/Los_Angeles"})===today).length;
-      if(attemptsToday>=2){await this.audit(state.conversation,"daily_prompt_budget");await this.save(state);return;}
+      if(attemptsToday>=(this.deps.promptBudget??2)){await this.audit(state.conversation,"daily_prompt_budget");await this.save(state);return;}
       const block=blocks.find(b=>now>=b.start&&(b.kind==="open"?b.end-now>=30*60_000:now-b.start<=5*60_000)&&now<b.end&&!state.events[b.key]?.startAttempted);
-      if(!block){await this.audit(state.conversation,"no_eligible_opening");await this.save(state);return;}
-      const gate=this.deps.evaluate?await this.deps.evaluate(state.conversation,block):{allow:true,message:undefined};
+      if(!block&&!this.deps.coordinate){await this.audit(state.conversation,"no_eligible_opening");await this.save(state);return;}
+      const gate=this.deps.coordinate?await this.deps.coordinate(state.conversation,block,calendarAvailable):this.deps.evaluate?await this.deps.evaluate(state.conversation,block!):{allow:true,message:undefined};
       if(!gate.allow){await this.save(state);return;}
+      if(gate.kind==="checkin"&&gate.message){
+        if((state.quietEnabled===true&&isQuiet(this.now(),state.quietStart,state.quietEnd))||await this.deps.busy(state.conversation)){await this.audit(state.conversation,"context_changed_before_send");await this.save(state);return;}
+        const key=`arrival:${now}`;state.events[key]={block:{key,title:"Arrival check-in",start:now,end:now+10*60000},startAttempted:true};state.lastPrompt=now;
+        await this.save(state);await this.deps.send(state.conversation,gate.message);return;
+      }
+      if(gate.kind==="place"&&gate.message){
+        if((state.quietEnabled===true&&isQuiet(this.now(),state.quietStart,state.quietEnd))||await this.deps.busy(state.conversation)){await this.audit(state.conversation,"context_changed_before_send");await this.save(state);return;}
+        const key=`place:${now}`,placeBlock:StudyBlock={key,title:"Place confirmation",start:now,end:now+10*60000};
+        state.events[key]={block:placeBlock,startAttempted:true};state.pending={key,expires:placeBlock.end,kind:"place"};state.lastPrompt=now;
+        await this.save(state);await this.deps.send(state.conversation,gate.message);return;
+      }
+      if(!block){await this.audit(state.conversation,"no_current_calendar_opening");await this.save(state);return;}
       if(gate.plannedMinutes!==undefined&&(!Number.isInteger(gate.plannedMinutes)||gate.plannedMinutes<25||gate.plannedMinutes>45||gate.plannedMinutes*60000>block.end-this.now())){await this.audit(state.conversation,"invalid_selected_duration");await this.save(state);return;}
-      if(this.deps.evaluate){
+      if(this.deps.evaluate||this.deps.coordinate){
         const fresh=(await this.deps.events(this.now())).find(b=>b.key===block.key);
         if(!fresh||fresh.end-this.now()<Math.min(30,gate.plannedMinutes??30)*60_000||await this.deps.busy(state.conversation)||(state.quietEnabled===true&&isQuiet(this.now(),state.quietStart,state.quietEnd))){
           await this.audit(state.conversation,"context_changed_before_send");await this.save(state);return;
@@ -171,4 +187,3 @@ export class StudyReminders {
     });
   }
 }
-

@@ -1,3 +1,5 @@
+import {beforeEach} from "bun:test";
+const previousProvider=process.env.AI_PROVIDER;beforeEach(()=>{process.env.AI_PROVIDER="gemini";});afterEach(()=>{if(previousProvider===undefined)delete process.env.AI_PROVIDER;else process.env.AI_PROVIDER=previousProvider;});
 import {afterEach,expect,test} from "bun:test";
 import {mkdtemp,readFile,readdir,rm} from "node:fs/promises";
 import {join} from "node:path";
@@ -37,9 +39,9 @@ test("failed or invalid interpretations never save or guess and calls are capped
 });
 test("interpreter schema is strict and API receives only the bounded description",async()=>{
  for(const v of [{attribution:"negative"},{attribution:"setup",rating:1},null])expect(()=>validateAttribution(v)).toThrow();
- const old=process.env.XAI_API_KEY;process.env.XAI_API_KEY="test-only";
+ const old=process.env.GEMINI_API_KEY;process.env.GEMINI_API_KEY="test-only";
  try{
-  const result=await interpretDistraction("A friend interrupted me.",(async(url,init)=>{expect(String(url)).toBe("https://api.x.ai/v1/responses");const body=JSON.parse(String(init?.body));expect(body.store).toBe(false);expect(body.input).toBe(JSON.stringify({description:"A friend interrupted me."}));expect(body.text.format.schema.additionalProperties).toBe(false);return Response.json({status:"completed",output:[{type:"message",content:[{type:"output_text",text:'{"attribution":"interruption"}'}]}]});}) as typeof fetch);expect(result).toBe("interruption");
+  const result=await interpretDistraction("A friend interrupted me.",(async(url,init)=>{expect(String(url)).toContain("generativelanguage.googleapis.com");const body=JSON.parse(String(init?.body));expect(body.contents[0].parts[0].text).toBe(JSON.stringify({description:"A friend interrupted me."}));expect(body.generationConfig.responseJsonSchema.additionalProperties).toBe(false);return Response.json({candidates:[{finishReason:"STOP",content:{parts:[{text:'{"attribution":"interruption"}'}]}}]});}) as typeof fetch);expect(result).toBe("interruption");
   await expect(interpretDistraction("x".repeat(801))).rejects.toThrow("length");
- }finally{if(old===undefined)delete process.env.XAI_API_KEY;else process.env.XAI_API_KEY=old;}
+ }finally{if(old===undefined)delete process.env.GEMINI_API_KEY;else process.env.GEMINI_API_KEY=old;}
 });
